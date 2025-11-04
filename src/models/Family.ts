@@ -29,7 +29,7 @@ export class FamilyModel {
          f.*,
          (SELECT COUNT(*) FROM parishioners WHERE family_id = f.family_id AND is_active = TRUE) AS member_count
        FROM families f
-       WHERE f.parish_id = @parishId AND f.is_active = 1
+       WHERE f.parish_id = @parishId AND f.is_active = TRUE
        ORDER BY f.family_name ASC
        LIMIT @limit OFFSET @offset`,
       { parishId, offset, limit }
@@ -50,7 +50,7 @@ export class FamilyModel {
          f.*,
          (SELECT COUNT(*) FROM parishioners WHERE family_id = f.family_id AND is_active = TRUE) AS member_count
        FROM families f
-       WHERE f.ward_id = @wardId AND f.is_active = 1
+       WHERE f.ward_id = @wardId AND f.is_active = TRUE
        ORDER BY f.family_name ASC
        LIMIT @limit OFFSET @offset`,
       { wardId, offset, limit }
@@ -65,7 +65,7 @@ export class FamilyModel {
          f.*,
          (SELECT COUNT(*) FROM parishioners WHERE family_id = f.family_id AND is_active = TRUE) AS member_count
        FROM families f
-       WHERE f.parish_id = @parishId AND f.is_active = 1
+       WHERE f.parish_id = @parishId AND f.is_active = TRUE
        ORDER BY f.family_name ASC`,
       { parishId }
     );
@@ -235,7 +235,7 @@ export class FamilyModel {
          f.*,
          (SELECT COUNT(*) FROM parishioners WHERE family_id = f.family_id AND is_active = TRUE) AS member_count
        FROM families f
-       WHERE f.parish_id = @parishId AND f.is_active = 1 AND (
+       WHERE f.parish_id = @parishId AND f.is_active = TRUE AND (
          f.family_name LIKE '%' + @searchTerm + '%' OR
          f.head_of_family LIKE '%' + @searchTerm + '%' OR
          f.address_line1 LIKE '%' + @searchTerm + '%' OR

@@ -345,7 +345,7 @@ export class ParishionerModel {
     }
 
     await database.executeQuery(
-      `UPDATE parishioners SET is_active = 0, updated_at = NOW() WHERE parishioner_id = @parishionerId`,
+      `UPDATE parishioners SET is_active = FALSE, updated_at = NOW() WHERE parishioner_id = @parishionerId`,
       { parishionerId }
     );
   }

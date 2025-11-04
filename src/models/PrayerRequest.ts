@@ -6,7 +6,7 @@ import { ApiError } from '../utils/apiError';
 export class PrayerRequestModel {
   public static async getChurchAdminId(userId: number): Promise<number | undefined> {
     const result = await database.executeQuery<{ church_admin_id: number }>(
-      `SELECT church_admin_id FROM church_admins WHERE user_id = @userId AND is_active = 1`,
+      `SELECT church_admin_id FROM church_admins WHERE user_id = @userId AND is_active = TRUE`,
       { userId }
     );
 
