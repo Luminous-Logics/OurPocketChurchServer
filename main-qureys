@@ -1,0 +1,1344 @@
+-- =====================================================
+-- PARISH NEXUS FLOW - ESSENTIAL SQL QUERIES
+-- Complete collection of important database queries
+-- =====================================================
+
+-- =====================================================
+-- 1. USER MANAGEMENT QUERIES
+-- =====================================================
+
+-- Get user by email (for login)
+SELECT 
+    u.user_id,
+    u.email,
+    u.password_hash,
+    u.first_name,
+    u.last_name,
+    u.phone,
+    u.profile_image_url,
+    u.user_type,
+    u.is_active,
+    u.email_verified,
+    u.last_login,
+    u.created_at
+FROM users u
+WHERE u.email = 'user@example.com' AND u.is_active = 1;
+
+-- Get user with all details
+SELECT 
+    u.*,
+    p.parishioner_id,
+    p.parish_id,
+    p.ward_id,
+    p.family_id,
+    par.parish_name,
+    w.ward_name,
+    f.family_name
+FROM users u
+LEFT JOIN parishioners p ON u.user_id = p.user_id
+LEFT JOIN parishes par ON p.parish_id = par.parish_id
+LEFT JOIN wards w ON p.ward_id = w.ward_id
+LEFT JOIN families f ON p.family_id = f.family_id
+WHERE u.user_id = 1;
+
+-- Get all active users by user type
+SELECT user_id, email, first_name, last_name, user_type, created_at
+FROM users
+WHERE user_type = 'parishioner' AND is_active = 1
+ORDER BY created_at DESC;
+
+-- Search users by name or email
+SELECT user_id, email, first_name, last_name, phone, user_type
+FROM users
+WHERE (
+    first_name LIKE '%John%' 
+    OR last_name LIKE '%Doe%' 
+    OR email LIKE '%john%'
+) AND is_active = 1;
+
+-- Get users created in last 30 days
+SELECT user_id, email, first_name, last_name, created_at
+FROM users
+WHERE created_at >= DATEADD(DAY, -30, GETDATE())
+ORDER BY created_at DESC;
+
+-- =====================================================
+-- 2. ROLE & PERMISSION QUERIES
+-- =====================================================
+
+-- Get all roles assigned to a user
+SELECT 
+    u.user_id,
+    u.email,
+    u.first_name,
+    u.last_name,
+    r.role_id,
+    r.role_name,
+    r.role_code,
+    r.description,
+    r.is_system_role,
+    r.role_scope,
+    ur.assigned_at,
+    ur.expires_at,
+    ur.is_active
+FROM users u
+INNER JOIN user_roles ur ON u.user_id = ur.user_id
+INNER JOIN roles r ON ur.role_id = r.role_id
+WHERE u.user_id = 1 AND ur.is_active = 1;
+
+-- Get all permissions for a specific user (via roles)
+SELECT DISTINCT
+    u.user_id,
+    u.email,
+    p.permission_id,
+    p.permission_code,
+    p.permission_name,
+    p.module,
+    p.action,
+    r.role_name AS granted_via_role
+FROM users u
+INNER JOIN user_roles ur ON u.user_id = ur.user_id
+INNER JOIN roles r ON ur.role_id = r.role_id
+INNER JOIN role_permissions rp ON r.role_id = rp.role_id
+INNER JOIN permissions p ON rp.permission_id = p.permission_id
+WHERE u.user_id = 1 
+    AND ur.is_active = 1 
+    AND p.is_active = 1
+ORDER BY p.module, p.action;
+
+-- Get all permissions for a user (including direct grants/revokes)
+SELECT DISTINCT
+    u.user_id,
+    p.permission_id,
+    p.permission_code,
+    p.permission_name,
+    p.module,
+    p.action,
+    CASE 
+        WHEN up.permission_type = 'REVOKE' THEN 0
+        ELSE 1
+    END AS has_permission,
+    COALESCE(up.permission_type, 'ROLE') AS grant_type
+FROM users u
+INNER JOIN user_roles ur ON u.user_id = ur.user_id
+INNER JOIN role_permissions rp ON ur.role_id = rp.role_id
+INNER JOIN permissions p ON rp.permission_id = p.permission_id
+LEFT JOIN user_permissions up ON u.user_id = up.user_id AND p.permission_id = up.permission_id
+WHERE u.user_id = 1 AND ur.is_active = 1
+ORDER BY p.module, p.action;
+
+-- Check if user has specific permission
+SELECT 
+    CASE 
+        WHEN COUNT(*) > 0 THEN 1 
+        ELSE 0 
+    END AS has_permission
+FROM users u
+INNER JOIN user_roles ur ON u.user_id = ur.user_id
+INNER JOIN role_permissions rp ON ur.role_id = rp.role_id
+INNER JOIN permissions p ON rp.permission_id = p.permission_id
+WHERE u.user_id = 1 
+    AND p.permission_code = 'VIEW_PARISHIONERS'
+    AND ur.is_active = 1
+    AND p.is_active = 1
+    AND NOT EXISTS (
+        SELECT 1 FROM user_permissions up
+        WHERE up.user_id = u.user_id 
+            AND up.permission_id = p.permission_id
+            AND up.permission_type = 'REVOKE'
+            AND up.is_active = 1
+    );
+
+-- Get all roles with permission counts
+SELECT 
+    r.role_id,
+    r.role_code,
+    r.role_name,
+    r.is_system_role,
+    r.role_scope,
+    COUNT(rp.permission_id) AS permission_count
+FROM roles r
+LEFT JOIN role_permissions rp ON r.role_id = rp.role_id
+WHERE r.is_active = 1
+GROUP BY r.role_id, r.role_code, r.role_name, r.is_system_role, r.role_scope
+ORDER BY r.priority DESC;
+
+-- Get all permissions for a specific role
+SELECT 
+    r.role_name,
+    r.role_code,
+    p.permission_id,
+    p.permission_code,
+    p.permission_name,
+    p.module,
+    p.action,
+    rp.granted_at
+FROM roles r
+INNER JOIN role_permissions rp ON r.role_id = rp.role_id
+INNER JOIN permissions p ON rp.permission_id = p.permission_id
+WHERE r.role_id = 2
+ORDER BY p.module, p.action;
+
+-- Get all users with a specific role
+SELECT 
+    u.user_id,
+    u.email,
+    u.first_name,
+    u.last_name,
+    u.user_type,
+    ur.assigned_at,
+    ur.expires_at,
+    CONCAT(assigner.first_name, ' ', assigner.last_name) AS assigned_by_name
+FROM user_roles ur
+INNER JOIN users u ON ur.user_id = u.user_id
+INNER JOIN roles r ON ur.role_id = r.role_id
+LEFT JOIN users assigner ON ur.assigned_by = assigner.user_id
+WHERE r.role_code = 'CHURCH_ADMIN' AND ur.is_active = 1;
+
+-- =====================================================
+-- 3. PARISH MANAGEMENT QUERIES
+-- =====================================================
+
+-- Get all parishes with details
+SELECT 
+    p.*,
+    COUNT(DISTINCT par.parishioner_id) AS total_parishioners,
+    COUNT(DISTINCT w.ward_id) AS total_wards,
+    COUNT(DISTINCT f.family_id) AS total_families
+FROM parishes p
+LEFT JOIN parishioners par ON p.parish_id = par.parish_id
+LEFT JOIN wards w ON p.parish_id = w.parish_id
+LEFT JOIN families f ON p.parish_id = f.parish_id
+WHERE p.is_active = 1
+GROUP BY p.parish_id, p.parish_name, p.diocese, p.address_line1, p.address_line2, 
+    p.city, p.state, p.country, p.postal_code, p.phone, p.email, p.website_url,
+    p.established_date, p.patron_saint, p.timezone, p.subscription_plan, 
+    p.subscription_expiry, p.is_active, p.created_at, p.updated_at;
+
+-- Get parish with all administrators
+SELECT 
+    p.parish_id,
+    p.parish_name,
+    ca.church_admin_id,
+    u.user_id,
+    u.email,
+    u.first_name,
+    u.last_name,
+    ca.role AS admin_role,
+    ca.department,
+    ca.is_primary_admin,
+    ca.hire_date
+FROM parishes p
+INNER JOIN church_admins ca ON p.parish_id = ca.parish_id
+INNER JOIN users u ON ca.user_id = u.user_id
+WHERE p.parish_id = 1 AND ca.is_active = 1;
+
+-- Get active parishes expiring soon (subscription)
+SELECT 
+    parish_id,
+    parish_name,
+    subscription_plan,
+    subscription_expiry,
+    DATEDIFF(DAY, GETDATE(), subscription_expiry) AS days_remaining
+FROM parishes
+WHERE is_active = 1 
+    AND subscription_expiry IS NOT NULL
+    AND subscription_expiry <= DATEADD(DAY, 30, GETDATE())
+ORDER BY subscription_expiry;
+
+-- =====================================================
+-- 4. PARISHIONER QUERIES
+-- =====================================================
+
+-- Get all parishioners in a parish
+SELECT 
+    p.parishioner_id,
+    u.user_id,
+    u.email,
+    u.first_name,
+    u.last_name,
+    p.middle_name,
+    p.date_of_birth,
+    p.gender,
+    p.marital_status,
+    p.occupation,
+    p.member_status,
+    w.ward_name,
+    f.family_name,
+    p.registration_date
+FROM parishioners p
+INNER JOIN users u ON p.user_id = u.user_id
+LEFT JOIN wards w ON p.ward_id = w.ward_id
+LEFT JOIN families f ON p.family_id = f.family_id
+WHERE p.parish_id = 1 AND p.is_active = 1
+ORDER BY u.last_name, u.first_name;
+
+-- Get parishioner with full details
+SELECT 
+    p.*,
+    u.email,
+    u.first_name,
+    u.last_name,
+    u.phone,
+    u.profile_image_url,
+    par.parish_name,
+    w.ward_name,
+    f.family_name,
+    f.home_phone AS family_phone
+FROM parishioners p
+INNER JOIN users u ON p.user_id = u.user_id
+LEFT JOIN parishes par ON p.parish_id = par.parish_id
+LEFT JOIN wards w ON p.ward_id = w.ward_id
+LEFT JOIN families f ON p.family_id = f.family_id
+WHERE p.parishioner_id = 1;
+
+-- Get parishioners by ward
+SELECT 
+    p.parishioner_id,
+    u.first_name,
+    u.last_name,
+    u.email,
+    u.phone,
+    p.member_status,
+    f.family_name
+FROM parishioners p
+INNER JOIN users u ON p.user_id = u.user_id
+LEFT JOIN families f ON p.family_id = f.family_id
+WHERE p.ward_id = 1 AND p.is_active = 1
+ORDER BY u.last_name, u.first_name;
+
+-- Get parishioners by member status
+SELECT 
+    p.member_status,
+    COUNT(*) AS count
+FROM parishioners p
+WHERE p.parish_id = 1 AND p.is_active = 1
+GROUP BY p.member_status;
+
+-- Get birthday celebrants this month
+SELECT 
+    p.parishioner_id,
+    u.first_name,
+    u.last_name,
+    u.email,
+    p.date_of_birth,
+    DAY(p.date_of_birth) AS birth_day
+FROM parishioners p
+INNER JOIN users u ON p.user_id = u.user_id
+WHERE p.parish_id = 1 
+    AND p.is_active = 1
+    AND MONTH(p.date_of_birth) = MONTH(GETDATE())
+ORDER BY DAY(p.date_of_birth);
+
+-- Get parishioners with upcoming sacrament anniversaries
+SELECT 
+    p.parishioner_id,
+    u.first_name,
+    u.last_name,
+    u.email,
+    'Baptism' AS sacrament,
+    p.baptism_date AS sacrament_date,
+    DATEDIFF(YEAR, p.baptism_date, GETDATE()) AS years_ago
+FROM parishioners p
+INNER JOIN users u ON p.user_id = u.user_id
+WHERE p.parish_id = 1 
+    AND p.baptism_date IS NOT NULL
+    AND MONTH(p.baptism_date) = MONTH(GETDATE())
+    AND DAY(p.baptism_date) >= DAY(GETDATE())
+UNION ALL
+SELECT 
+    p.parishioner_id,
+    u.first_name,
+    u.last_name,
+    u.email,
+    'Marriage' AS sacrament,
+    p.marriage_date,
+    DATEDIFF(YEAR, p.marriage_date, GETDATE())
+FROM parishioners p
+INNER JOIN users u ON p.user_id = u.user_id
+WHERE p.parish_id = 1 
+    AND p.marriage_date IS NOT NULL
+    AND MONTH(p.marriage_date) = MONTH(GETDATE())
+    AND DAY(p.marriage_date) >= DAY(GETDATE())
+ORDER BY sacrament_date;
+
+-- =====================================================
+-- 5. FAMILY & WARD QUERIES
+-- =====================================================
+
+-- Get all families in a parish
+SELECT 
+    f.family_id,
+    f.family_name,
+    f.home_phone,
+    w.ward_name,
+    COUNT(p.parishioner_id) AS member_count,
+    pc.first_name AS contact_first_name,
+    pc.last_name AS contact_last_name,
+    u_pc.email AS contact_email,
+    u_pc.phone AS contact_phone
+FROM families f
+LEFT JOIN wards w ON f.ward_id = w.ward_id
+LEFT JOIN parishioners p ON f.family_id = p.family_id AND p.is_active = 1
+LEFT JOIN parishioners pc ON f.primary_contact_id = pc.parishioner_id
+LEFT JOIN users u_pc ON pc.user_id = u_pc.user_id
+WHERE f.parish_id = 1 AND f.is_active = 1
+GROUP BY f.family_id, f.family_name, f.home_phone, w.ward_name,
+    pc.first_name, pc.last_name, u_pc.email, u_pc.phone
+ORDER BY f.family_name;
+
+-- Get family members
+SELECT 
+    f.family_id,
+    f.family_name,
+    p.parishioner_id,
+    u.first_name,
+    u.last_name,
+    u.email,
+    p.date_of_birth,
+    p.gender,
+    p.marital_status,
+    CASE WHEN f.primary_contact_id = p.parishioner_id THEN 1 ELSE 0 END AS is_primary_contact
+FROM families f
+INNER JOIN parishioners p ON f.family_id = p.family_id
+INNER JOIN users u ON p.user_id = u.user_id
+WHERE f.family_id = 1 AND p.is_active = 1
+ORDER BY is_primary_contact DESC, u.last_name, u.first_name;
+
+-- Get all wards with statistics
+SELECT 
+    w.ward_id,
+    w.ward_name,
+    w.ward_number,
+    w.description,
+    w.area_coverage,
+    COUNT(DISTINCT f.family_id) AS total_families,
+    COUNT(DISTINCT p.parishioner_id) AS total_members,
+    coordinator.first_name AS coordinator_first_name,
+    coordinator.last_name AS coordinator_last_name
+FROM wards w
+LEFT JOIN families f ON w.ward_id = f.ward_id AND f.is_active = 1
+LEFT JOIN parishioners p ON w.ward_id = p.ward_id AND p.is_active = 1
+LEFT JOIN church_admins ca ON w.coordinator_id = ca.church_admin_id
+LEFT JOIN users coordinator ON ca.user_id = coordinator.user_id
+WHERE w.parish_id = 1 AND w.is_active = 1
+GROUP BY w.ward_id, w.ward_name, w.ward_number, w.description, w.area_coverage,
+    coordinator.first_name, coordinator.last_name
+ORDER BY w.ward_number;
+
+-- Get ward roles for a specific ward
+SELECT 
+    wr.ward_role_id,
+    wr.role_name,
+    p.parishioner_id,
+    u.first_name,
+    u.last_name,
+    u.email,
+    u.phone,
+    wr.is_primary,
+    wr.assigned_at,
+    wr.expires_at
+FROM ward_roles wr
+INNER JOIN parishioners p ON wr.parishioner_id = p.parishioner_id
+INNER JOIN users u ON p.user_id = u.user_id
+WHERE wr.ward_id = 1 AND wr.is_active = 1
+ORDER BY wr.is_primary DESC, wr.role_name;
+
+-- =====================================================
+-- 6. ACCOUNTING QUERIES
+-- =====================================================
+
+-- Get all transactions for a parish
+SELECT 
+    a.account_id,
+    a.transaction_date,
+    a.transaction_type,
+    ac.category_name,
+    a.amount,
+    a.description,
+    a.reference_number,
+    a.payment_method,
+    a.balance_after,
+    u.first_name + ' ' + u.last_name AS created_by_name
+FROM accounts a
+INNER JOIN account_categories ac ON a.category_id = ac.category_id
+LEFT JOIN users u ON a.created_by = u.user_id
+WHERE a.parish_id = 1
+ORDER BY a.transaction_date DESC, a.created_at DESC;
+
+-- Get income vs expense summary
+SELECT 
+    a.transaction_type,
+    COUNT(*) AS transaction_count,
+    SUM(a.amount) AS total_amount
+FROM accounts a
+WHERE a.parish_id = 1
+    AND a.transaction_date >= DATEADD(MONTH, -1, GETDATE())
+GROUP BY a.transaction_type;
+
+-- Get monthly financial summary
+SELECT 
+    YEAR(a.transaction_date) AS year,
+    MONTH(a.transaction_date) AS month,
+    DATENAME(MONTH, a.transaction_date) AS month_name,
+    SUM(CASE WHEN a.transaction_type = 'income' THEN a.amount ELSE 0 END) AS total_income,
+    SUM(CASE WHEN a.transaction_type = 'expense' THEN a.amount ELSE 0 END) AS total_expense,
+    SUM(CASE WHEN a.transaction_type = 'income' THEN a.amount ELSE -a.amount END) AS net_balance
+FROM accounts a
+WHERE a.parish_id = 1
+    AND a.transaction_date >= DATEADD(YEAR, -1, GETDATE())
+GROUP BY YEAR(a.transaction_date), MONTH(a.transaction_date), DATENAME(MONTH, a.transaction_date)
+ORDER BY year DESC, month DESC;
+
+-- Get expenses by category
+SELECT 
+    ac.category_name,
+    COUNT(*) AS transaction_count,
+    SUM(a.amount) AS total_amount,
+    AVG(a.amount) AS average_amount
+FROM accounts a
+INNER JOIN account_categories ac ON a.category_id = ac.category_id
+WHERE a.parish_id = 1
+    AND a.transaction_type = 'expense'
+    AND a.transaction_date >= DATEADD(MONTH, -3, GETDATE())
+GROUP BY ac.category_name
+ORDER BY total_amount DESC;
+
+-- Get current balance
+SELECT 
+    TOP 1 balance_after AS current_balance
+FROM accounts
+WHERE parish_id = 1
+ORDER BY transaction_date DESC, created_at DESC;
+
+-- Get account categories
+SELECT 
+    category_id,
+    category_name,
+    category_type,
+    description,
+    is_system
+FROM account_categories
+WHERE is_active = 1
+ORDER BY category_type, category_name;
+
+-- =====================================================
+-- 7. PRAYER REQUEST QUERIES
+-- =====================================================
+
+-- Get all prayer requests for a parish
+SELECT 
+    pr.prayer_request_id,
+    pr.requester_name,
+    pr.subject,
+    pr.description,
+    pr.booking_date,
+    pr.booking_time,
+    pr.status,
+    pr.is_urgent,
+    pr.is_public,
+    pr.is_anonymous,
+    pr.created_at,
+    CASE 
+        WHEN pr.is_anonymous = 1 THEN NULL
+        ELSE p.parishioner_id
+    END AS parishioner_id,
+    CASE 
+        WHEN pr.is_anonymous = 1 THEN NULL
+        ELSE u.first_name + ' ' + u.last_name
+    END AS requester_full_name
+FROM prayer_requests pr
+LEFT JOIN parishioners p ON pr.requested_by = p.parishioner_id
+LEFT JOIN users u ON p.user_id = u.user_id
+WHERE pr.parish_id = 1
+ORDER BY pr.is_urgent DESC, pr.created_at DESC;
+
+-- Get pending prayer requests
+SELECT 
+    pr.prayer_request_id,
+    pr.requester_name,
+    pr.subject,
+    pr.booking_date,
+    pr.booking_time,
+    pr.is_urgent,
+    pr.created_at
+FROM prayer_requests pr
+WHERE pr.parish_id = 1 
+    AND pr.status = 'pending'
+ORDER BY pr.is_urgent DESC, pr.created_at;
+
+-- Get prayer request statistics
+SELECT 
+    pr.status,
+    COUNT(*) AS count
+FROM prayer_requests pr
+WHERE pr.parish_id = 1
+    AND pr.created_at >= DATEADD(MONTH, -1, GETDATE())
+GROUP BY pr.status;
+
+-- =====================================================
+-- 8. BIBLE & SPIRITUAL RESOURCES
+-- =====================================================
+
+-- Get daily Bible reading for a specific date
+SELECT 
+    dbr.reading_id,
+    dbr.reading_date,
+    dbr.book_name,
+    dbr.chapter,
+    dbr.verse_start,
+    dbr.verse_end,
+    dbr.translation,
+    dbr.title,
+    dbr.content
+FROM daily_bible_readings dbr
+WHERE dbr.parish_id = 1
+    AND dbr.reading_date = CAST(GETDATE() AS DATE)
+    AND dbr.is_active = 1;
+
+-- Get user's Bible bookmarks
+SELECT 
+    bb.bookmark_id,
+    bb.book_name,
+    bb.chapter,
+    bb.verse_start,
+    bb.verse_end,
+    bb.translation,
+    bb.note,
+    bb.highlight_color,
+    bb.is_favorite,
+    bb.created_at
+FROM bible_bookmarks bb
+WHERE bb.user_id = 1
+ORDER BY bb.is_favorite DESC, bb.created_at DESC;
+
+-- Get user's reading history
+SELECT 
+    brh.history_id,
+    brh.book_name,
+    brh.chapter,
+    brh.verse_start,
+    brh.verse_end,
+    brh.translation,
+    brh.reading_date,
+    brh.reading_duration_seconds,
+    brh.completed
+FROM bible_reading_history brh
+WHERE brh.user_id = 1
+ORDER BY brh.reading_date DESC;
+
+-- Get reading statistics for a user
+SELECT 
+    COUNT(*) AS total_readings,
+    COUNT(DISTINCT book_name) AS books_read,
+    SUM(reading_duration_seconds) / 60 AS total_minutes,
+    COUNT(DISTINCT CAST(reading_date AS DATE)) AS days_read
+FROM bible_reading_history
+WHERE user_id = 1
+    AND reading_date >= DATEADD(MONTH, -1, GETDATE());
+
+-- Get all audiobooks
+SELECT 
+    ab.audiobook_id,
+    ab.title,
+    ab.author,
+    ab.narrator,
+    ab.description,
+    ab.thumbnail_url,
+    ab.audio_file_url,
+    ab.duration_minutes,
+    ab.category,
+    ab.language,
+    ab.publication_year
+FROM audiobooks ab
+WHERE ab.parish_id = 1 AND ab.is_active = 1
+ORDER BY ab.created_at DESC;
+
+-- Get audiobooks by category
+SELECT 
+    ab.category,
+    COUNT(*) AS audiobook_count,
+    SUM(ab.duration_minutes) AS total_duration_minutes
+FROM audiobooks ab
+WHERE ab.parish_id = 1 AND ab.is_active = 1
+GROUP BY ab.category
+ORDER BY audiobook_count DESC;
+
+-- =====================================================
+-- 9. EMAIL QUERIES
+-- =====================================================
+
+-- Get email templates
+SELECT 
+    et.template_id,
+    et.template_code,
+    et.template_name,
+    et.subject,
+    et.category,
+    et.variables,
+    et.is_active
+FROM email_templates et
+WHERE et.is_active = 1
+ORDER BY et.category, et.template_name;
+
+-- Get email logs with status
+SELECT 
+    el.log_id,
+    el.recipient_email,
+    el.recipient_name,
+    el.subject,
+    el.status,
+    el.sent_at,
+    el.delivered_at,
+    el.opened_at,
+    et.template_name
+FROM email_logs el
+LEFT JOIN email_templates et ON el.template_id = et.template_id
+WHERE el.created_at >= DATEADD(DAY, -7, GETDATE())
+ORDER BY el.created_at DESC;
+
+-- Get email queue items pending
+SELECT 
+    eq.queue_id,
+    eq.template_code,
+    eq.recipient_email,
+    eq.recipient_name,
+    eq.priority,
+    eq.scheduled_at,
+    eq.status,
+    eq.attempts,
+    eq.created_at
+FROM email_queue eq
+WHERE eq.status = 'pending'
+    AND (eq.scheduled_at IS NULL OR eq.scheduled_at <= GETDATE())
+ORDER BY eq.priority, eq.created_at;
+
+-- Get email statistics
+SELECT 
+    el.status,
+    COUNT(*) AS count,
+    COUNT(CASE WHEN el.opened_at IS NOT NULL THEN 1 END) AS opened_count,
+    COUNT(CASE WHEN el.clicked_at IS NOT NULL THEN 1 END) AS clicked_count
+FROM email_logs el
+WHERE el.created_at >= DATEADD(DAY, -30, GETDATE())
+GROUP BY el.status;
+
+-- =====================================================
+-- 10. OTP QUERIES
+-- =====================================================
+
+-- Verify OTP code
+SELECT 
+    otp_id,
+    user_id,
+    otp_code,
+    otp_type,
+    delivery_method,
+    is_verified,
+    expires_at,
+    attempts
+FROM otp_codes
+WHERE user_id = 1
+    AND otp_code = '123456'
+    AND otp_type = 'login'
+    AND is_verified = 0
+    AND expires_at > GETDATE()
+    AND attempts < 3;
+
+-- Get active OTP for user
+SELECT TOP 1
+    otp_id,
+    otp_code,
+    otp_type,
+    expires_at,
+    attempts
+FROM otp_codes
+WHERE user_id = 1
+    AND otp_type = 'login'
+    AND is_verified = 0
+    AND expires_at > GETDATE()
+ORDER BY created_at DESC;
+
+-- Clean up expired OTP codes
+DELETE FROM otp_codes
+WHERE expires_at < DATEADD(HOUR, -24, GETDATE());
+
+-- =====================================================
+-- 11. DASHBOARD & ANALYTICS QUERIES
+-- =====================================================
+
+-- Parish Dashboard Summary
+SELECT 
+    (SELECT COUNT(*) FROM parishioners WHERE parish_id = 1 AND is_active = 1) AS total_parishioners,
+    (SELECT COUNT(*) FROM families WHERE parish_id = 1 AND is_active = 1) AS total_families,
+    (SELECT COUNT(*) FROM wards WHERE parish_id = 1 AND is_active = 1) AS total_wards,
+    (SELECT COUNT(*) FROM prayer_requests WHERE parish_id = 1 AND status = 'pending') AS pending_prayers,
+    (SELECT SUM(CASE WHEN transaction_type = 'income' THEN amount ELSE 0 END) 
+     FROM accounts WHERE parish_id = 1 AND transaction_date >= DATEADD(MONTH, -1, GETDATE())) AS monthly_income,
+    (SELECT SUM(CASE WHEN transaction_type = 'expense' THEN amount ELSE 0 END) 
+     FROM accounts WHERE parish_id = 1 AND transaction_date >= DATEADD(MONTH, -1, GETDATE())) AS monthly_expense;
+
+-- Recent activity log
+SELECT TOP 20
+    'User' AS activity_type,
+    u.first_name + ' ' + u.last_name AS description,
+    u.created_at AS activity_date
+FROM users u
+WHERE u.created_at >= DATEADD(DAY, -30, GETDATE())
+UNION ALL
+SELECT 
+    'Prayer Request',
+    pr.subject,
+    pr.created_at
+FROM prayer_requests pr
+WHERE pr.parish_id = 1 AND pr.created_at >= DATEADD(DAY, -30, GETDATE())
+UNION ALL
+SELECT 
+    'Transaction',
+    a.description,
+    a.created_at
+FROM accounts a
+WHERE a.parish_id = 1 AND a.created_at >= DATEADD(DAY, -30, GETDATE())
+ORDER BY activity_date DESC;
+
+-- User growth over time
+SELECT 
+    YEAR(created_at) AS year,
+    MONTH(created_at) AS month,
+    user_type,
+    COUNT(*) AS user_count
+FROM users
+WHERE created_at >= DATEADD(YEAR, -1, GETDATE())
+GROUP BY YEAR(created_at), MONTH(created_at), user_type
+ORDER BY year DESC, month DESC, user_type;
+
+-- =====================================================
+-- 12. SEARCH & FILTER QUERIES
+-- =====================================================
+
+-- Advanced parishioner search
+SELECT 
+    p.parishioner_id,
+    u.first_name,
+    u.last_name,
+    u.email,
+    u.phone,
+    p.date_of_birth,
+    p.gender,
+    p.member_status,
+    w.ward_name,
+    f.family_name
+FROM parishioners p
+INNER JOIN users u ON p.user_id = u.user_id
+LEFT JOIN wards w ON p.ward_id = w.ward_id
+LEFT JOIN families f ON p.family_id = f.family_id
+WHERE p.parish_id = 1
+    AND p.is_active = 1
+    AND (
+        u.first_name LIKE '%search%'
+        OR u.last_name LIKE '%search%'
+        OR u.email LIKE '%search%'
+        OR p.occupation LIKE '%search%'
+    )
+    AND (@ward_id IS NULL OR p.ward_id = @ward_id)
+    AND (@gender IS NULL OR p.gender = @gender)
+    AND (@member_status IS NULL OR p.member_status = @member_status)
+ORDER BY u.last_name, u.first_name;
+
+-- =====================================================
+-- 13. REPORTS QUERIES
+-- =====================================================
+
+-- Parishioner Demographics Report
+SELECT 
+    p.gender,
+    p.marital_status,
+    COUNT(*) AS count,
+    AVG(DATEDIFF(YEAR, p.date_of_birth, GETDATE())) AS average_age
+FROM parishioners p
+WHERE p.parish_id = 1 AND p.is_active = 1
+GROUP BY p.gender, p.marital_status
+ORDER BY p.gender, p.marital_status;
+
+-- Age Distribution Report
+SELECT 
+    CASE 
+        WHEN DATEDIFF(YEAR, p.date_of_birth, GETDATE()) < 18 THEN '0-17'
+        WHEN DATEDIFF(YEAR, p.date_of_birth, GETDATE()) BETWEEN 18 AND 30 THEN '18-30'
+        WHEN DATEDIFF(YEAR, p.date_of_birth, GETDATE()) BETWEEN 31 AND 45 THEN '31-45'
+        WHEN DATEDIFF(YEAR, p.date_of_birth, GETDATE()) BETWEEN 46 AND 60 THEN '46-60'
+        ELSE '61+'
+    END AS age_group,
+    COUNT(*) AS count
+FROM parishioners p
+WHERE p.parish_id = 1 
+    AND p.is_active = 1
+    AND p.date_of_birth IS NOT NULL
+GROUP BY 
+    CASE 
+        WHEN DATEDIFF(YEAR, p.date_of_birth, GETDATE()) < 18 THEN '0-17'
+        WHEN DATEDIFF(YEAR, p.date_of_birth, GETDATE()) BETWEEN 18 AND 30 THEN '18-30'
+        WHEN DATEDIFF(YEAR, p.date_of_birth, GETDATE()) BETWEEN 31 AND 45 THEN '31-45'
+        WHEN DATEDIFF(YEAR, p.date_of_birth, GETDATE()) BETWEEN 46 AND 60 THEN '46-60'
+        ELSE '61+'
+    END
+ORDER BY age_group;
+
+-- Sacraments Report
+SELECT 
+    'Baptized' AS sacrament,
+    COUNT(*) AS count
+FROM parishioners
+WHERE parish_id = 1 AND baptism_date IS NOT NULL AND is_active = 1
+UNION ALL
+SELECT 
+    'First Communion',
+    COUNT(*)
+FROM parishioners
+WHERE parish_id = 1 AND first_communion_date IS NOT NULL AND is_active = 1
+UNION ALL
+SELECT 
+    'Confirmed',
+    COUNT(*)
+FROM parishioners
+WHERE parish_id = 1 AND confirmation_date IS NOT NULL AND is_active = 1
+UNION ALL
+SELECT 
+    'Married',
+    COUNT(*)
+FROM parishioners
+WHERE parish_id = 1 AND marriage_date IS NOT NULL AND is_active = 1;
+
+-- Ward Distribution Report
+SELECT 
+    w.ward_id,
+    w.ward_name,
+    w.ward_number,
+    COUNT(DISTINCT p.parishioner_id) AS member_count,
+    COUNT(DISTINCT f.family_id) AS family_count,
+    COUNT(DISTINCT wr.ward_role_id) AS role_assignments
+FROM wards w
+LEFT JOIN parishioners p ON w.ward_id = p.ward_id AND p.is_active = 1
+LEFT JOIN families f ON w.ward_id = f.ward_id AND f.is_active = 1
+LEFT JOIN ward_roles wr ON w.ward_id = wr.ward_id AND wr.is_active = 1
+WHERE w.parish_id = 1 AND w.is_active = 1
+GROUP BY w.ward_id, w.ward_name, w.ward_number
+ORDER BY w.ward_number;
+
+-- Financial Annual Report
+SELECT 
+    YEAR(a.transaction_date) AS year,
+    ac.category_name,
+    a.transaction_type,
+    COUNT(*) AS transaction_count,
+    SUM(a.amount) AS total_amount
+FROM accounts a
+INNER JOIN account_categories ac ON a.category_id = ac.category_id
+WHERE a.parish_id = 1
+    AND a.transaction_date >= DATEADD(YEAR, -1, GETDATE())
+GROUP BY YEAR(a.transaction_date), ac.category_name, a.transaction_type
+ORDER BY year DESC, transaction_type, total_amount DESC;
+
+-- New Members Report (Last 30 Days)
+SELECT 
+    p.parishioner_id,
+    u.first_name,
+    u.last_name,
+    u.email,
+    u.phone,
+    p.registration_date,
+    w.ward_name,
+    f.family_name
+FROM parishioners p
+INNER JOIN users u ON p.user_id = u.user_id
+LEFT JOIN wards w ON p.ward_id = w.ward_id
+LEFT JOIN families f ON p.family_id = f.family_id
+WHERE p.parish_id = 1
+    AND p.registration_date >= DATEADD(DAY, -30, GETDATE())
+ORDER BY p.registration_date DESC;
+
+-- Inactive Members Report
+SELECT 
+    p.parishioner_id,
+    u.first_name,
+    u.last_name,
+    u.email,
+    u.phone,
+    u.last_login,
+    p.member_status,
+    w.ward_name
+FROM parishioners p
+INNER JOIN users u ON p.user_id = u.user_id
+LEFT JOIN wards w ON p.ward_id = w.ward_id
+WHERE p.parish_id = 1
+    AND (
+        p.member_status = 'inactive'
+        OR u.last_login IS NULL
+        OR u.last_login < DATEADD(MONTH, -6, GETDATE())
+    )
+ORDER BY u.last_login;
+
+-- =====================================================
+-- 14. DATA MAINTENANCE QUERIES
+-- =====================================================
+
+-- Update user last login
+UPDATE users 
+SET last_login = GETDATE(), 
+    updated_at = GETDATE()
+WHERE user_id = 1;
+
+-- Soft delete user
+UPDATE users 
+SET is_active = 0, 
+    updated_at = GETDATE()
+WHERE user_id = 1;
+
+-- Deactivate expired user roles
+UPDATE user_roles 
+SET is_active = 0
+WHERE expires_at IS NOT NULL 
+    AND expires_at < GETDATE() 
+    AND is_active = 1;
+
+-- Update ward member counts
+UPDATE w
+SET 
+    w.total_families = (
+        SELECT COUNT(DISTINCT f.family_id)
+        FROM families f
+        WHERE f.ward_id = w.ward_id AND f.is_active = 1
+    ),
+    w.total_members = (
+        SELECT COUNT(DISTINCT p.parishioner_id)
+        FROM parishioners p
+        WHERE p.ward_id = w.ward_id AND p.is_active = 1
+    ),
+    w.updated_at = GETDATE()
+FROM wards w
+WHERE w.parish_id = 1;
+
+-- Mark OTP as verified
+UPDATE otp_codes 
+SET is_verified = 1,
+    verified_at = GETDATE()
+WHERE otp_id = 1;
+
+-- Update email log status
+UPDATE email_logs 
+SET status = 'sent',
+    sent_at = GETDATE()
+WHERE log_id = 1;
+
+-- Process email queue item
+UPDATE email_queue 
+SET status = 'processing',
+    attempts = attempts + 1
+WHERE queue_id = 1;
+
+-- Update parish subscription
+UPDATE parishes
+SET subscription_expiry = DATEADD(YEAR, 1, subscription_expiry),
+    updated_at = GETDATE()
+WHERE parish_id = 1;
+
+-- =====================================================
+-- 15. BULK OPERATIONS
+-- =====================================================
+
+-- Assign role to multiple users
+INSERT INTO user_roles (user_id, role_id, assigned_by, assigned_at, is_active)
+SELECT user_id, 3, 1, GETDATE(), 1
+FROM users
+WHERE user_type = 'parishioner' 
+    AND user_id NOT IN (SELECT user_id FROM user_roles WHERE role_id = 3);
+
+-- Move multiple families to a ward
+UPDATE families
+SET ward_id = 1,
+    updated_at = GETDATE()
+WHERE family_id IN (1, 2, 3, 4, 5);
+
+-- Bulk email queue insertion
+INSERT INTO email_queue (template_code, recipient_email, recipient_name, variables, priority, scheduled_at)
+SELECT 
+    'EVENT_REMINDER',
+    u.email,
+    u.first_name + ' ' + u.last_name,
+    JSON_OBJECT('firstName', u.first_name, 'eventName', 'Sunday Mass'),
+    5,
+    DATEADD(HOUR, 24, GETDATE())
+FROM users u
+INNER JOIN parishioners p ON u.user_id = p.user_id
+WHERE p.parish_id = 1 
+    AND p.is_active = 1
+    AND u.email_verified = 1;
+
+-- =====================================================
+-- 16. COMPLEX QUERIES
+-- =====================================================
+
+-- Get users with all their permissions (from roles and direct grants)
+WITH UserPermissions AS (
+    -- Permissions from roles
+    SELECT 
+        u.user_id,
+        p.permission_id,
+        p.permission_code,
+        p.permission_name,
+        p.module,
+        p.action,
+        'ROLE' AS grant_source,
+        r.role_name AS source_name
+    FROM users u
+    INNER JOIN user_roles ur ON u.user_id = ur.user_id AND ur.is_active = 1
+    INNER JOIN role_permissions rp ON ur.role_id = rp.role_id
+    INNER JOIN permissions p ON rp.permission_id = p.permission_id AND p.is_active = 1
+    INNER JOIN roles r ON ur.role_id = r.role_id
+    WHERE u.user_id = 1
+    
+    UNION
+    
+    -- Direct permission grants
+    SELECT 
+        u.user_id,
+        p.permission_id,
+        p.permission_code,
+        p.permission_name,
+        p.module,
+        p.action,
+        up.permission_type AS grant_source,
+        'Direct Assignment' AS source_name
+    FROM users u
+    INNER JOIN user_permissions up ON u.user_id = up.user_id AND up.is_active = 1
+    INNER JOIN permissions p ON up.permission_id = p.permission_id AND p.is_active = 1
+    WHERE u.user_id = 1 AND up.permission_type = 'GRANT'
+)
+SELECT DISTINCT
+    user_id,
+    permission_code,
+    permission_name,
+    module,
+    action,
+    STRING_AGG(grant_source + ':' + source_name, ', ') AS granted_via
+FROM UserPermissions
+WHERE permission_id NOT IN (
+    SELECT permission_id 
+    FROM user_permissions 
+    WHERE user_id = 1 
+        AND permission_type = 'REVOKE' 
+        AND is_active = 1
+)
+GROUP BY user_id, permission_id, permission_code, permission_name, module, action
+ORDER BY module, action;
+
+-- Hierarchical family structure
+WITH FamilyHierarchy AS (
+    SELECT 
+        f.family_id,
+        f.family_name,
+        p.parishioner_id,
+        u.first_name,
+        u.last_name,
+        u.email,
+        p.marital_status,
+        p.date_of_birth,
+        CASE WHEN f.primary_contact_id = p.parishioner_id THEN 1 ELSE 0 END AS is_head,
+        DATEDIFF(YEAR, p.date_of_birth, GETDATE()) AS age
+    FROM families f
+    INNER JOIN parishioners p ON f.family_id = p.family_id
+    INNER JOIN users u ON p.user_id = u.user_id
+    WHERE f.parish_id = 1 AND f.is_active = 1 AND p.is_active = 1
+)
+SELECT 
+    family_id,
+    family_name,
+    first_name,
+    last_name,
+    email,
+    marital_status,
+    age,
+    is_head,
+    ROW_NUMBER() OVER (PARTITION BY family_id ORDER BY is_head DESC, age DESC) AS family_position
+FROM FamilyHierarchy
+ORDER BY family_name, family_position;
+
+-- Financial trend analysis with running totals
+WITH MonthlyFinancials AS (
+    SELECT 
+        YEAR(transaction_date) AS year,
+        MONTH(transaction_date) AS month,
+        SUM(CASE WHEN transaction_type = 'income' THEN amount ELSE 0 END) AS monthly_income,
+        SUM(CASE WHEN transaction_type = 'expense' THEN amount ELSE 0 END) AS monthly_expense
+    FROM accounts
+    WHERE parish_id = 1
+        AND transaction_date >= DATEADD(YEAR, -1, GETDATE())
+    GROUP BY YEAR(transaction_date), MONTH(transaction_date)
+)
+SELECT 
+    year,
+    month,
+    monthly_income,
+    monthly_expense,
+    monthly_income - monthly_expense AS net_balance,
+    SUM(monthly_income - monthly_expense) OVER (ORDER BY year, month) AS running_balance,
+    AVG(monthly_income) OVER (ORDER BY year, month ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS avg_income_3months,
+    AVG(monthly_expense) OVER (ORDER BY year, month ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS avg_expense_3months
+FROM MonthlyFinancials
+ORDER BY year DESC, month DESC;
+
+-- Ward performance comparison
+SELECT 
+    w.ward_id,
+    w.ward_name,
+    COUNT(DISTINCT p.parishioner_id) AS member_count,
+    COUNT(DISTINCT f.family_id) AS family_count,
+    COUNT(DISTINCT CASE WHEN p.member_status = 'active' THEN p.parishioner_id END) AS active_members,
+    COUNT(DISTINCT pr.prayer_request_id) AS prayer_requests_count,
+    CAST(COUNT(DISTINCT CASE WHEN p.member_status = 'active' THEN p.parishioner_id END) AS FLOAT) / 
+        NULLIF(COUNT(DISTINCT p.parishioner_id), 0) * 100 AS active_percentage
+FROM wards w
+LEFT JOIN parishioners p ON w.ward_id = p.ward_id AND p.is_active = 1
+LEFT JOIN families f ON w.ward_id = f.ward_id AND f.is_active = 1
+LEFT JOIN prayer_requests pr ON p.parishioner_id = pr.requested_by 
+    AND pr.created_at >= DATEADD(MONTH, -1, GETDATE())
+WHERE w.parish_id = 1 AND w.is_active = 1
+GROUP BY w.ward_id, w.ward_name
+ORDER BY active_percentage DESC;
+
+-- User engagement metrics
+SELECT 
+    u.user_id,
+    u.email,
+    u.first_name,
+    u.last_name,
+    u.last_login,
+    DATEDIFF(DAY, u.last_login, GETDATE()) AS days_since_login,
+    (SELECT COUNT(*) FROM bible_reading_history WHERE user_id = u.user_id AND reading_date >= DATEADD(MONTH, -1, GETDATE())) AS monthly_readings,
+    (SELECT COUNT(*) FROM bible_bookmarks WHERE user_id = u.user_id) AS bookmarks_count,
+    (SELECT COUNT(*) FROM prayer_requests pr 
+     INNER JOIN parishioners p ON pr.requested_by = p.parishioner_id 
+     WHERE p.user_id = u.user_id AND pr.created_at >= DATEADD(MONTH, -1, GETDATE())) AS prayer_requests_count,
+    CASE 
+        WHEN u.last_login >= DATEADD(DAY, -7, GETDATE()) THEN 'Highly Active'
+        WHEN u.last_login >= DATEADD(DAY, -30, GETDATE()) THEN 'Active'
+        WHEN u.last_login >= DATEADD(DAY, -90, GETDATE()) THEN 'Moderately Active'
+        ELSE 'Inactive'
+    END AS engagement_level
+FROM users u
+INNER JOIN parishioners p ON u.user_id = p.user_id
+WHERE p.parish_id = 1 AND u.is_active = 1
+ORDER BY u.last_login DESC;
+
+-- =====================================================
+-- 17. VALIDATION & INTEGRITY CHECKS
+-- =====================================================
+
+-- Find orphaned records (parishioners without users)
+SELECT p.*
+FROM parishioners p
+LEFT JOIN users u ON p.user_id = u.user_id
+WHERE u.user_id IS NULL;
+
+-- Find users with no roles
+SELECT u.user_id, u.email, u.first_name, u.last_name, u.user_type
+FROM users u
+LEFT JOIN user_roles ur ON u.user_id = ur.user_id AND ur.is_active = 1
+WHERE ur.user_role_id IS NULL
+    AND u.is_active = 1
+    AND u.user_type != 'super_admin';
+
+-- Find families with no members
+SELECT f.family_id, f.family_name, f.ward_id
+FROM families f
+LEFT JOIN parishioners p ON f.family_id = p.family_id AND p.is_active = 1
+WHERE p.parishioner_id IS NULL
+    AND f.is_active = 1;
+
+-- Find wards with no members
+SELECT w.ward_id, w.ward_name, w.parish_id
+FROM wards w
+LEFT JOIN parishioners p ON w.ward_id = p.ward_id AND p.is_active = 1
+WHERE p.parishioner_id IS NULL
+    AND w.is_active = 1;
+
+-- Find duplicate emails
+SELECT email, COUNT(*) AS count
+FROM users
+GROUP BY email
+HAVING COUNT(*) > 1;
+
+-- Check for invalid foreign keys
+SELECT 'parishioners without valid parishes' AS issue, COUNT(*) AS count
+FROM parishioners p
+LEFT JOIN parishes par ON p.parish_id = par.parish_id
+WHERE par.parish_id IS NULL
+UNION ALL
+SELECT 'families without valid parishes', COUNT(*)
+FROM families f
+LEFT JOIN parishes par ON f.parish_id = par.parish_id
+WHERE par.parish_id IS NULL
+UNION ALL
+SELECT 'wards without valid parishes', COUNT(*)
+FROM wards w
+LEFT JOIN parishes par ON w.parish_id = par.parish_id
+WHERE par.parish_id IS NULL;
+
+-- =====================================================
+-- 18. PERFORMANCE OPTIMIZATION QUERIES
+-- =====================================================
+
+-- Index usage statistics
+SELECT 
+    OBJECT_NAME(s.object_id) AS table_name,
+    i.name AS index_name,
+    s.user_seeks,
+    s.user_scans,
+    s.user_lookups,
+    s.user_updates,
+    s.user_seeks + s.user_scans + s.user_lookups AS total_reads
+FROM sys.dm_db_index_usage_stats s
+INNER JOIN sys.indexes i ON s.object_id = i.object_id AND s.index_id = i.index_id
+WHERE database_id = DB_ID()
+    AND OBJECT_NAME(s.object_id) IN ('users', 'parishioners', 'families', 'wards', 'accounts')
+ORDER BY total_reads DESC;
+
+-- Table size and row counts
+SELECT 
+    t.name AS table_name,
+    p.rows AS row_count,
+    SUM(a.total_pages) * 8 AS total_space_kb,
+    SUM(a.used_pages) * 8 AS used_space_kb,
+    (SUM(a.total_pages) - SUM(a.used_pages)) * 8 AS unused_space_kb
+FROM sys.tables t
+INNER JOIN sys.indexes i ON t.object_id = i.object_id
+INNER JOIN sys.partitions p ON i.object_id = p.object_id AND i.index_id = p.index_id
+INNER JOIN sys.allocation_units a ON p.partition_id = a.container_id
+WHERE t.name IN ('users', 'parishioners', 'families', 'wards', 'accounts', 'roles', 'permissions')
+    AND i.index_id <= 1
+GROUP BY t.name, p.rows
+ORDER BY total_space_kb DESC;
+
+-- =====================================================
+-- 19. BACKUP & RECOVERY QUERIES
+-- =====================================================
+
+-- Get last backup information
+SELECT 
+    database_name,
+    backup_start_date,
+    backup_finish_date,
+    type,
+    CASE type
+        WHEN 'D' THEN 'Full'
+        WHEN 'I' THEN 'Differential'
+        WHEN 'L' THEN 'Log'
+    END AS backup_type,
+    backup_size / 1024 / 1024 AS backup_size_mb
+FROM msdb.dbo.backupset
+WHERE database_name = 'ParishNexusDB'
+ORDER BY backup_start_date DESC;
+
+-- =====================================================
+-- END OF ESSENTIAL QUERIES
+-- =====================================================

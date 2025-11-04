@@ -1,0 +1,334 @@
+================================================================================
+  SQL SERVER TO POSTGRESQL MIGRATION REPORT
+  Parish Nexus Flow API - Complete Migration
+================================================================================
+
+Migration Date: November 3, 2025
+Project: Parish Management System API
+Status: ✓ COMPLETED
+
+================================================================================
+EXECUTIVE SUMMARY
+================================================================================
+
+The entire Parish Nexus Flow API has been successfully migrated from Microsoft
+SQL Server to PostgreSQL. All database connections, queries, and models have
+been updated to use PostgreSQL syntax and the 'pg' driver.
+
+Total Files Modified: 22 files
+Total Model Files Migrated: 17 files
+
+================================================================================
+PACKAGE DEPENDENCIES
+================================================================================
+
+REMOVED:
+  - mssql: ^10.0.1
+  - @types/mssql: ^9.1.8
+
+ADDED:
+  - pg: ^8.11.3
+  - @types/pg: ^8.10.0
+
+ACTION REQUIRED:
+  Run: npm install
+
+================================================================================
+CONFIGURATION FILES UPDATED
+================================================================================
+
+1. package.json
+   - Replaced mssql with pg (PostgreSQL driver)
+   - Updated TypeScript type definitions
+
+2. src/config/index.ts
+   - Changed DatabaseConfig interface for PostgreSQL
+   - Updated from SQL Server specific options to PostgreSQL options
+   - Changed: server → host
+   - Changed: port default from 1433 → 5432
+   - Removed: encrypt, trustServerCertificate, enableArithAbort
+   - Added: ssl option for PostgreSQL
+
+3. src/config/database.ts
+   - Complete rewrite using 'pg' Pool instead of mssql
+   - Implemented named parameter conversion (@param → $1, $2, etc.)
+   - Updated transaction handling for PostgreSQL
+   - Changed result access from recordset to rows
+   - Added proper error logging with query and params
+
+4. .env
+   - Changed DB_SERVER to DB_HOST
+   - Changed DB_PORT from 1433 to 5432
+   - Removed DB_ENCRYPT and DB_TRUST_SERVER_CERTIFICATE
+   - Added DB_SSL option
+   - Updated default credentials for PostgreSQL
+
+================================================================================
+MODEL FILES MIGRATED (17 files)
+================================================================================
+
+All models in src/models/ have been converted:
+
+✓ User.ts              - User authentication and management
+✓ Role.ts              - Role-based access control (RBAC)
+✓ Account.ts           - Financial account transactions
+✓ AccountCategory.ts   - Account category management
+✓ Audiobook.ts         - Audiobook library management
+✓ Bible.ts             - Bible readings and bookmarks
+✓ ChurchAdmin.ts       - Church administrator management
+✓ EmailLog.ts          - Email delivery logging
+✓ EmailQueue.ts        - Email queue management
+✓ EmailTemplate.ts     - Email template system
+✓ Family.ts            - Family management
+✓ Otp.ts               - One-time password handling
+✓ Parish.ts            - Parish management
+✓ Parishioner.ts       - Parishioner management
+✓ PrayerRequest.ts     - Prayer request system
+✓ Ward.ts              - Ward management
+✓ WardRole.ts          - Ward role assignments
+
+================================================================================
+SQL SYNTAX CONVERSIONS APPLIED
+================================================================================
+
+1. RESULT ACCESS
+   - Changed: result.recordset → result.rows
+   - Changed: result.recordset[0] → result.rows[0]
+
+2. DATE/TIME FUNCTIONS
+   - Changed: GETDATE() → NOW()
+   - Changed: GETDATE() → CURRENT_TIMESTAMP (where appropriate)
+   - Changed: CAST(GETDATE() AS DATE) → CURRENT_DATE
+   - Changed: DATEADD(day, -7, GETDATE()) → NOW() - INTERVAL '7 days'
+
+3. INSERT STATEMENTS
+   - Changed: OUTPUT INSERTED.* → RETURNING *
+   - Changed: OUTPUT INSERTED.id → RETURNING id
+
+4. BOOLEAN VALUES
+   - Changed: 1 → TRUE
+   - Changed: 0 → FALSE
+   - Changed: is_active = 1 → is_active = TRUE
+   - Changed: is_active = 0 → is_active = FALSE
+
+5. PAGINATION
+   - Changed: OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+   - To: LIMIT @limit OFFSET @offset
+
+6. TOP CLAUSE
+   - Changed: SELECT TOP (@limit) * FROM table
+   - To: SELECT * FROM table LIMIT @limit
+
+7. JSON OPERATIONS
+   - Changed: FOR JSON PATH
+   - To: json_agg(json_build_object(...))
+
+8. NULL HANDLING
+   - Changed: ISNULL(column, default) → COALESCE(column, default)
+
+9. MERGE STATEMENTS (SQL Server specific)
+   - Changed: MERGE ... WHEN MATCHED THEN UPDATE ... WHEN NOT MATCHED THEN INSERT
+   - To: INSERT ... ON CONFLICT (...) DO UPDATE SET ...
+
+10. TYPE CASTING
+    - Removed all SQL Server type annotations (sql.BigInt, sql.VarChar, etc.)
+    - PostgreSQL uses automatic type inference with parameterized queries
+
+11. COUNT QUERIES
+    - Added explicit parsing: parseInt(result.rows[0].count as any, 10)
+    - PostgreSQL returns bigint for COUNT, needs conversion to number
+
+================================================================================
+DATABASE CONNECTION CHANGES
+================================================================================
+
+OLD PATTERN (SQL Server):
+  const pool = database.getPool();
+  const request = pool.request();
+  request.input('param', sql.VarChar, value);
+  const result = await request.query(query);
+  return result.recordset;
+
+NEW PATTERN (PostgreSQL):
+  const result = await database.executeQuery<Type>(query, { param: value });
+  return result.rows;
+
+The new database class automatically converts named parameters (@param) to
+PostgreSQL positional parameters ($1, $2, etc.).
+
+================================================================================
+ENVIRONMENT CONFIGURATION
+================================================================================
+
+Update your .env file with PostgreSQL connection details:
+
+  DB_HOST=localhost          # Your PostgreSQL host
+  DB_PORT=5432              # PostgreSQL default port
+  DB_NAME=OurPocketChurch   # Your database name
+  DB_USER=postgres          # Your PostgreSQL username
+  DB_PASSWORD=***           # Your PostgreSQL password
+  DB_SSL=false              # Set to true if using SSL
+
+================================================================================
+NEXT STEPS - DATABASE SETUP
+================================================================================
+
+1. INSTALL POSTGRESQL
+   - Download and install PostgreSQL 15 or higher
+   - Windows: https://www.postgresql.org/download/windows/
+   - Or use Docker: docker run -p 5432:5432 -e POSTGRES_PASSWORD=yourpass postgres
+
+2. CREATE DATABASE
+   Execute in psql or pgAdmin:
+
+   CREATE DATABASE "OurPocketChurch";
+
+3. MIGRATE SCHEMA
+   You need to create the PostgreSQL schema. You have two options:
+
+   Option A: Export SQL Server schema and convert it
+   - Export your SQL Server schema
+   - Convert data types (e.g., BIGINT → BIGINT, DATETIME2 → TIMESTAMP)
+   - Convert identity columns: IDENTITY(1,1) → SERIAL or GENERATED ALWAYS
+   - Convert triggers and stored procedures if any
+
+   Option B: Use a migration tool
+   - pgLoader: https://pgloader.io/
+   - AWS Schema Conversion Tool
+   - Manual creation based on your models
+
+4. KEY POSTGRESQL DATA TYPE CONVERSIONS
+   SQL Server          → PostgreSQL
+   ────────────────────────────────────
+   BIGINT              → BIGINT
+   INT                 → INTEGER
+   VARCHAR(n)          → VARCHAR(n)
+   NVARCHAR(n)         → VARCHAR(n)
+   TEXT                → TEXT
+   BIT                 → BOOLEAN
+   DATETIME2           → TIMESTAMP
+   DATE                → DATE
+   UNIQUEIDENTIFIER    → UUID
+   IDENTITY(1,1)       → SERIAL or GENERATED ALWAYS AS IDENTITY
+
+5. INDEXES AND CONSTRAINTS
+   - Recreate all indexes from SQL Server
+   - Primary keys: Same syntax
+   - Foreign keys: Same syntax
+   - Unique constraints: Same syntax
+   - Check constraints: Same syntax
+
+6. DEFAULT VALUES
+   - Review DEFAULT constraints
+   - Change: DEFAULT GETDATE() → DEFAULT NOW()
+   - Change: DEFAULT NEWID() → DEFAULT gen_random_uuid()
+
+================================================================================
+DATA MIGRATION
+================================================================================
+
+To migrate your existing data from SQL Server to PostgreSQL:
+
+1. EXPORT DATA FROM SQL SERVER
+   - Use SQL Server Management Studio export wizard
+   - Export as CSV or use bcp utility
+   - Or use pg_chameleon for live migration
+
+2. IMPORT TO POSTGRESQL
+   - Use COPY command or \copy in psql
+   - Or use pgAdmin import tool
+
+3. VERIFY DATA
+   - Check row counts match
+   - Verify foreign key relationships
+   - Test sample queries
+
+================================================================================
+TESTING CHECKLIST
+================================================================================
+
+After setting up PostgreSQL database:
+
+□ Run: npm install (to install pg package)
+□ Update .env with your PostgreSQL credentials
+□ Create PostgreSQL database
+□ Migrate database schema
+□ Optionally migrate data
+□ Run: npm run build (to compile TypeScript)
+□ Run: npm run dev (to start development server)
+□ Test authentication endpoints
+□ Test user management
+□ Test role and permission management
+□ Test all CRUD operations
+□ Check logs for any database errors
+□ Run existing tests: npm test
+
+================================================================================
+IMPORTANT NOTES
+================================================================================
+
+1. TRANSACTION HANDLING
+   PostgreSQL transactions work differently. Review transaction code in:
+   - src/config/database.ts (beginTransaction, commitTransaction, rollbackTransaction)
+
+2. SEQUENCE MANAGEMENT
+   PostgreSQL uses SEQUENCES instead of IDENTITY. Auto-increment columns
+   should use SERIAL or BIGSERIAL types, or GENERATED ALWAYS AS IDENTITY.
+
+3. CASE SENSITIVITY
+   - PostgreSQL is case-sensitive for unquoted identifiers (converts to lowercase)
+   - SQL Server is case-insensitive by default
+   - Ensure table/column names match your schema
+
+4. STORED PROCEDURES
+   If you had SQL Server stored procedures, they need to be rewritten as
+   PostgreSQL functions using PL/pgSQL language.
+
+5. TRIGGERS
+   SQL Server triggers syntax differs from PostgreSQL. Rewrite if needed.
+
+6. FULL-TEXT SEARCH
+   If using full-text search, SQL Server's CONTAINS() needs to be replaced
+   with PostgreSQL's to_tsvector() and to_tsquery() functions.
+
+================================================================================
+ROLLBACK PLAN
+================================================================================
+
+If you need to revert to SQL Server:
+
+1. Git checkout previous commit before migration
+2. Or restore these packages:
+   npm install mssql@^10.0.1 @types/mssql@^9.1.8
+   npm uninstall pg @types/pg
+3. Restore original configuration files from git history
+
+================================================================================
+SUPPORT & RESOURCES
+================================================================================
+
+PostgreSQL Documentation:
+  - Official Docs: https://www.postgresql.org/docs/
+  - SQL Server Migration: https://wiki.postgresql.org/wiki/Converting_from_other_Databases_to_PostgreSQL
+
+Node.js pg Driver:
+  - GitHub: https://github.com/brianc/node-postgres
+  - Documentation: https://node-postgres.com/
+
+Migration Tools:
+  - pgLoader: https://pgloader.io/
+  - AWS SCT: https://aws.amazon.com/dms/schema-conversion-tool/
+
+================================================================================
+MIGRATION COMPLETED SUCCESSFULLY
+================================================================================
+
+All code has been updated and is ready for PostgreSQL. Follow the "NEXT STEPS"
+section to complete the database setup and start using PostgreSQL.
+
+For questions or issues during deployment, review the PostgreSQL error logs
+and compare query syntax with the official PostgreSQL documentation.
+
+Good luck with your PostgreSQL deployment!
+
+================================================================================

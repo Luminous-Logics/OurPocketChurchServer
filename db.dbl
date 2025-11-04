@@ -1,0 +1,435 @@
+
+Table users {
+  user_id bigint [pk, increment]
+  email nvarchar(255) [unique, not null]
+  password_hash nvarchar(255) [not null]
+  first_name nvarchar(100) [not null]
+  last_name nvarchar(100) [not null]
+  phone nvarchar(20)
+  profile_image_url nvarchar(500)
+  user_type nvarchar(50) [not null, note: 'super_admin, church_admin, parishioner']
+  is_active bit [default: 1]
+  email_verified bit [default: 0]
+  last_login datetime2
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+}
+
+Table parishes {
+  parish_id bigint [pk, increment]
+  parish_name nvarchar(200) [not null]
+  diocese nvarchar(200)
+  address_line1 nvarchar(255)
+  address_line2 nvarchar(255)
+  city nvarchar(100)
+  state nvarchar(100)
+  country nvarchar(100)
+  postal_code nvarchar(20)
+  phone nvarchar(20)
+  email nvarchar(255)
+  website_url nvarchar(500)
+  established_date date
+  patron_saint nvarchar(200)
+  timezone nvarchar(50) [default: 'UTC']
+  subscription_plan nvarchar(50) [note: 'basic, premium, enterprise']
+  subscription_expiry date
+  is_active bit [default: 1]
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+}
+
+Table church_admins {
+  church_admin_id bigint [pk, increment]
+  user_id bigint [unique, not null, ref: > users.user_id]
+  parish_id bigint [not null, ref: > parishes.parish_id]
+  role nvarchar(100) [not null]
+  department nvarchar(100)
+  permissions nvarchar(max)
+  hire_date date
+  is_primary_admin bit [default: 0]
+  is_active bit [default: 1]
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+}
+
+Table wards {
+  ward_id bigint [pk, increment]
+  parish_id bigint [not null, ref: > parishes.parish_id]
+  ward_name nvarchar(200) [not null]
+  ward_number nvarchar(50)
+  description nvarchar(max)
+  coordinator_id bigint [ref: > church_admins.church_admin_id]
+  area_coverage nvarchar(max)
+  total_families int [default: 0]
+  total_members int [default: 0]
+  is_active bit [default: 1]
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+}
+
+Table families {
+  family_id bigint [pk, increment]
+  parish_id bigint [not null, ref: > parishes.parish_id]
+  ward_id bigint [ref: > wards.ward_id]
+  family_name nvarchar(200) [not null]
+  primary_contact_id bigint [ref: > parishioners.parishioner_id]
+  home_phone nvarchar(20)
+  phone varchar(20)
+  registration_date date
+  head_of_family nvarchar(200)
+  address_line1 nvarchar(255)
+  address_line2 nvarchar(255)
+  city nvarchar(100)
+  state nvarchar(100)
+  country nvarchar(100)
+  postal_code nvarchar(20)
+  is_active bit [default: 1]
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+}
+
+Table parishioners {
+  parishioner_id bigint [pk, increment]
+  user_id bigint [unique, not null, ref: > users.user_id]
+  parish_id bigint [not null, ref: > parishes.parish_id]
+  ward_id bigint [ref: > wards.ward_id]
+  family_id bigint [ref: > families.family_id]
+  first_name varchar(100)
+  last_name varchar(100)
+  middle_name nvarchar(100)
+  email varchar(100)
+  phone varchar(20)
+  date_of_birth date
+  gender nvarchar(20) [note: 'male, female, other, prefer_not_to_say']
+  marital_status nvarchar(50) [note: 'single, married, divorced, widowed, separated']
+  occupation nvarchar(200)
+  baptism_date date
+  first_communion_date date
+  confirmation_date date
+  marriage_date date
+  member_status nvarchar(50) [default: 'active', note: 'active, inactive, visitor']
+  photo_url nvarchar(500)
+  address_line1 nvarchar(255)
+  address_line2 nvarchar(255)
+  city nvarchar(100)
+  state nvarchar(100)
+  country nvarchar(100)
+  postal_code nvarchar(20)
+  emergency_contact_name nvarchar(200)
+  emergency_contact_phone nvarchar(20)
+  notes nvarchar(max)
+  registration_date date
+  is_active bit [default: 1]
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+}
+
+Table roles {
+  role_id bigint [pk, increment]
+  parish_id bigint [ref: > parishes.parish_id]
+  role_name varchar(100) [not null]
+  role_code varchar(50) [not null]
+  description text
+  is_system_role bit [default: 0]
+  is_active bit [default: 1]
+  priority int [default: 0]
+  role_scope varchar(50) [default: 'GLOBAL']
+  is_ward_role bit [default: 0]
+  created_by bigint [ref: > users.user_id]
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+  
+  indexes {
+    (role_code, parish_id) [unique]
+  }
+}
+
+Table permissions {
+  permission_id bigint [pk, increment]
+  permission_name varchar(100) [not null]
+  permission_code varchar(100) [unique, not null]
+  description text
+  module varchar(50) [not null]
+  action varchar(50) [not null]
+  is_active bit [default: 1]
+  created_at datetime2 [default: `getdate()`]
+}
+
+Table user_roles {
+  user_role_id bigint [pk, increment]
+  user_id bigint [not null, ref: > users.user_id]
+  role_id bigint [not null, ref: > roles.role_id]
+  assigned_by bigint [ref: > users.user_id]
+  assigned_at datetime2 [default: `getdate()`]
+  expires_at datetime2
+  is_active bit [default: 1]
+  
+  indexes {
+    (user_id, role_id) [unique]
+  }
+}
+
+Table role_permissions {
+  role_permission_id bigint [pk, increment]
+  role_id bigint [not null, ref: > roles.role_id]
+  permission_id bigint [not null, ref: > permissions.permission_id]
+  granted_by bigint [ref: > users.user_id]
+  granted_at datetime2 [default: `getdate()`]
+  
+  indexes {
+    (role_id, permission_id) [unique]
+  }
+}
+
+Table user_permissions {
+  user_permission_id bigint [pk, increment]
+  user_id bigint [not null, ref: > users.user_id]
+  permission_id bigint [not null, ref: > permissions.permission_id]
+  permission_type varchar(10) [not null, note: 'GRANT, REVOKE']
+  assigned_by bigint [ref: > users.user_id]
+  assigned_at datetime2 [default: `getdate()`]
+  expires_at datetime2
+  reason text
+  is_active bit [default: 1]
+  
+  indexes {
+    (user_id, permission_id) [unique]
+  }
+}
+
+Table ward_roles {
+  ward_role_id bigint [pk, increment]
+  ward_id bigint [not null, ref: > wards.ward_id]
+  parishioner_id bigint [not null, ref: > parishioners.parishioner_id]
+  role_id bigint [not null, ref: > roles.role_id]
+  role_name varchar(100) [not null]
+  is_primary bit [default: 0]
+  assigned_by bigint [ref: > users.user_id]
+  assigned_at datetime2 [default: `getdate()`]
+  expires_at datetime2
+  is_active bit [default: 1]
+  notes text
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+  
+  indexes {
+    (ward_id, parishioner_id, role_id) [unique]
+  }
+}
+
+Table account_categories {
+  category_id bigint [pk, increment]
+  category_name varchar(100) [not null]
+  category_type varchar(20) [not null, note: 'income, expense']
+  description text
+  is_active bit [default: 1]
+  is_system bit [default: 1]
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+  
+  indexes {
+    (category_name, category_type) [unique]
+  }
+}
+
+Table accounts {
+  account_id bigint [pk, increment]
+  parish_id bigint [not null, ref: > parishes.parish_id]
+  transaction_date date [not null]
+  transaction_type varchar(20) [not null, note: 'income, expense']
+  category_id bigint [not null, ref: > account_categories.category_id]
+  amount decimal(15,2) [not null]
+  description text [not null]
+  reference_number varchar(100)
+  payment_method varchar(50)
+  balance_after decimal(15,2)
+  created_by bigint [ref: > users.user_id]
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+}
+
+Table prayer_requests {
+  prayer_request_id bigint [pk, increment]
+  parish_id bigint [not null, ref: > parishes.parish_id]
+  requested_by bigint [ref: > parishioners.parishioner_id]
+  requester_name varchar(255) [not null]
+  subject varchar(255) [not null]
+  description text [not null]
+  booking_date date
+  booking_time time
+  status varchar(50) [not null, default: 'pending', note: 'pending, confirmed, completed, cancelled']
+  is_anonymous bit [default: 0]
+  is_urgent bit [default: 0]
+  is_public bit [default: 1]
+  approved_by bigint [ref: > church_admins.church_admin_id]
+  notes text
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+}
+
+Table audiobooks {
+  audiobook_id bigint [pk, increment]
+  parish_id bigint [not null, ref: > parishes.parish_id]
+  title varchar(255) [not null]
+  author varchar(255) [not null]
+  narrator varchar(255)
+  description text
+  thumbnail_url varchar(500)
+  audio_file_url varchar(500)
+  duration_minutes int
+  file_size_mb decimal(10,2)
+  category varchar(100)
+  language varchar(50) [default: 'English']
+  publication_year int
+  is_active bit [default: 1]
+  created_by bigint [ref: > users.user_id]
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+}
+
+Table daily_bible_readings {
+  reading_id bigint [pk, increment]
+  parish_id bigint [not null, ref: > parishes.parish_id]
+  reading_date date [not null]
+  book_name varchar(100) [not null]
+  chapter int [not null]
+  verse_start int
+  verse_end int
+  translation varchar(20) [default: 'kjv']
+  title varchar(255)
+  content text
+  is_active bit [default: 1]
+  created_by bigint [ref: > users.user_id]
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+  
+  indexes {
+    (parish_id, reading_date) [unique]
+  }
+}
+
+Table bible_bookmarks {
+  bookmark_id bigint [pk, increment]
+  user_id bigint [not null, ref: > users.user_id]
+  book_name varchar(100) [not null]
+  chapter int [not null]
+  verse_start int
+  verse_end int
+  translation varchar(20) [default: 'kjv']
+  note text
+  highlight_color varchar(20)
+  is_favorite bit [default: 0]
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+}
+
+Table bible_reading_history {
+  history_id bigint [pk, increment]
+  user_id bigint [not null, ref: > users.user_id]
+  book_name varchar(100) [not null]
+  chapter int [not null]
+  verse_start int
+  verse_end int
+  translation varchar(20) [default: 'kjv']
+  reading_date date [not null]
+  reading_duration_seconds int
+  completed bit [default: 1]
+  created_at datetime2 [default: `getdate()`]
+}
+
+Table email_templates {
+  template_id bigint [pk, increment]
+  template_code varchar(100) [unique, not null]
+  template_name varchar(255) [not null]
+  subject varchar(500) [not null]
+  body_html text [not null]
+  body_text text
+  category varchar(50)
+  variables text
+  description text
+  is_active bit [default: 1]
+  created_by bigint [ref: > users.user_id]
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+}
+
+Table email_queue {
+  queue_id bigint [pk, increment]
+  template_code varchar(100) [ref: > email_templates.template_code]
+  recipient_email varchar(255) [not null]
+  recipient_name varchar(255)
+  variables text
+  priority int [default: 5]
+  scheduled_at datetime2
+  status varchar(20) [default: 'pending', note: 'pending, processing, sent, failed']
+  attempts int [default: 0]
+  max_attempts int [default: 3]
+  last_error text
+  created_at datetime2 [default: `getdate()`]
+  processed_at datetime2
+}
+
+Table email_logs {
+  log_id bigint [pk, increment]
+  template_id bigint [ref: > email_templates.template_id]
+  recipient_email varchar(255) [not null]
+  recipient_name varchar(255)
+  subject varchar(500) [not null]
+  body_html text
+  body_text text
+  status varchar(20) [not null, note: 'sent, failed, pending']
+  provider varchar(50)
+  provider_message_id varchar(255)
+  error_message text
+  sent_at datetime2
+  delivered_at datetime2
+  opened_at datetime2
+  clicked_at datetime2
+  variables text
+  retry_count int [default: 0]
+  ip_address varchar(50)
+  user_agent varchar(500)
+  created_at datetime2 [default: `getdate()`]
+}
+
+Table otp_codes {
+  otp_id bigint [pk, increment]
+  user_id bigint [not null, ref: > users.user_id]
+  otp_code varchar(6) [not null]
+  otp_type varchar(20) [not null, note: 'login, password_reset, verification']
+  delivery_method varchar(10) [not null, note: 'email, sms']
+  phone varchar(20)
+  email varchar(255)
+  is_verified bit [default: 0]
+  expires_at datetime2 [not null]
+  created_at datetime2 [default: `getdate()`]
+  verified_at datetime2
+  ip_address varchar(50)
+  attempts int [default: 0]
+}
+
+Table deleted_parish {
+  deleted_id bigint [pk, increment]
+  parish_id bigint [not null]
+  parish_name nvarchar(200) [not null]
+  diocese nvarchar(200)
+  address_line1 nvarchar(255)
+  address_line2 nvarchar(255)
+  city nvarchar(100)
+  state nvarchar(100)
+  country nvarchar(100)
+  postal_code nvarchar(20)
+  phone nvarchar(20)
+  email nvarchar(255)
+  website_url nvarchar(500)
+  established_date date
+  patron_saint nvarchar(200)
+  timezone nvarchar(50)
+  subscription_plan nvarchar(50)
+  subscription_expiry date
+  deleted_reason nvarchar(255)
+  deleted_by bigint [ref: > users.user_id]
+  deleted_at datetime2 [default: `getdate()`]
+  created_at datetime2
+  updated_at datetime2
+}
