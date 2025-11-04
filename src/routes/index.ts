@@ -10,6 +10,7 @@ import accountRoutes from './account.routes';
 import bibleRoutes from './bible.routes';
 import roleRoutes from './role.routes';
 import otpRoutes from './otp.routes';
+import uploadRoutes from './upload.routes';
 // Import other route modules here as they are created
 // etc.
 
@@ -50,6 +51,7 @@ router.use('/accounts', accountRoutes);
 router.use('/bible', bibleRoutes);
 router.use('/roles', roleRoutes);
 router.use('/otp', otpRoutes);
+router.use('/upload', uploadRoutes);
 // Add more routes as needed
 
 export default router;
