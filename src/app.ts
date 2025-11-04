@@ -29,7 +29,14 @@ app.use(
 );
 
 // CORS
-app.use(cors(config.cors));
+app.use(cors({
+  origin: config.cors.origin,
+  credentials: config.cors.credentials,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  maxAge: 86400, // 24 hours
+}));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));

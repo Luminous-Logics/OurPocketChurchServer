@@ -96,7 +96,9 @@ const config: Config = {
 
   // CORS configuration
   cors: {
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: process.env.CORS_ORIGIN?.includes(',')
+      ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
+      : (process.env.CORS_ORIGIN || '*'),
     credentials: true,
   },
 
