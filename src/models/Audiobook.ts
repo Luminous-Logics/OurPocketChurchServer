@@ -214,9 +214,9 @@ export class AudiobookModel {
     const result = await database.executeQuery<IAudiobook>(
       `SELECT * FROM audiobooks
        WHERE parish_id = @parishId AND is_active = TRUE AND (
-         title LIKE '%' + @searchTerm + '%' OR
-         author LIKE '%' + @searchTerm + '%' OR
-         narrator LIKE '%' + @searchTerm + '%'
+         title LIKE '%' || @searchTerm || '%' OR
+         author LIKE '%' || @searchTerm || '%' OR
+         narrator LIKE '%' || @searchTerm || '%'
        )
        ORDER BY title ASC`,
       { parishId, searchTerm }
@@ -260,7 +260,7 @@ export class AudiobookModel {
 
     const result = await database.executeQuery<IAudiobook>(
       `SELECT * FROM audiobooks
-       WHERE parish_id = @parishId AND author LIKE '%' + @author + '%' AND is_active = TRUE
+       WHERE parish_id = @parishId AND author LIKE '%' || @author || '%' AND is_active = TRUE
        ORDER BY title ASC
        LIMIT @limit OFFSET @offset`,
       { parishId, author, offset, limit }

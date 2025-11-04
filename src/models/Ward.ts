@@ -213,9 +213,9 @@ export class WardModel {
     const result = await database.executeQuery<IWard>(
       `SELECT * FROM wards
        WHERE parish_id = @parishId AND is_active = TRUE AND (
-         ward_name LIKE '%' + @searchTerm + '%' OR
-         ward_number LIKE '%' + @searchTerm + '%' OR
-         area_coverage LIKE '%' + @searchTerm + '%'
+         ward_name LIKE '%' || @searchTerm || '%' OR
+         ward_number LIKE '%' || @searchTerm || '%' OR
+         area_coverage LIKE '%' || @searchTerm || '%'
        )
        ORDER BY ward_name ASC`,
       { parishId, searchTerm }

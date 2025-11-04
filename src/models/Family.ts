@@ -236,12 +236,12 @@ export class FamilyModel {
          (SELECT COUNT(*) FROM parishioners WHERE family_id = f.family_id AND is_active = TRUE) AS member_count
        FROM families f
        WHERE f.parish_id = @parishId AND f.is_active = TRUE AND (
-         f.family_name LIKE '%' + @searchTerm + '%' OR
-         f.head_of_family LIKE '%' + @searchTerm + '%' OR
-         f.address_line1 LIKE '%' + @searchTerm + '%' OR
-         f.city LIKE '%' + @searchTerm + '%' OR
-         f.state LIKE '%' + @searchTerm + '%' OR
-         f.postal_code LIKE '%' + @searchTerm + '%'
+         f.family_name LIKE '%' || @searchTerm || '%' OR
+         f.head_of_family LIKE '%' || @searchTerm || '%' OR
+         f.address_line1 LIKE '%' || @searchTerm || '%' OR
+         f.city LIKE '%' || @searchTerm || '%' OR
+         f.state LIKE '%' || @searchTerm || '%' OR
+         f.postal_code LIKE '%' || @searchTerm || '%'
        )
        ORDER BY f.family_name ASC`,
       { parishId, searchTerm }

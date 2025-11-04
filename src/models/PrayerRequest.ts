@@ -365,9 +365,9 @@ export class PrayerRequestModel {
     const result = await database.executeQuery<IPrayerRequest>(
       `SELECT * FROM prayer_requests
        WHERE parish_id = @parishId AND (
-         subject LIKE '%' + @searchTerm + '%' OR
-         description LIKE '%' + @searchTerm + '%' OR
-         requester_name LIKE '%' + @searchTerm + '%'
+         subject LIKE '%' || @searchTerm || '%' OR
+         description LIKE '%' || @searchTerm || '%' OR
+         requester_name LIKE '%' || @searchTerm || '%'
        )
        ORDER BY booking_date DESC, booking_time DESC`,
       { parishId, searchTerm }

@@ -355,10 +355,10 @@ export class ParishionerModel {
       `SELECT p.* FROM parishioners p
        INNER JOIN users u ON p.user_id = u.user_id
        WHERE p.parish_id = @parishId AND p.is_active = TRUE AND (
-         u.first_name LIKE '%' + @searchTerm + '%' OR
-         u.last_name LIKE '%' + @searchTerm + '%' OR
-         u.email LIKE '%' + @searchTerm + '%' OR
-         p.middle_name LIKE '%' + @searchTerm + '%'
+         u.first_name LIKE '%' || @searchTerm || '%' OR
+         u.last_name LIKE '%' || @searchTerm || '%' OR
+         u.email LIKE '%' || @searchTerm || '%' OR
+         p.middle_name LIKE '%' || @searchTerm || '%'
        )
        ORDER BY u.first_name, u.last_name ASC`,
       { parishId, searchTerm }

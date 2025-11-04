@@ -305,9 +305,9 @@ export class AccountModel {
        FROM accounts a
        LEFT JOIN account_categories ac ON a.category_id = ac.category_id
        WHERE a.parish_id = @parishId AND (
-         a.description LIKE '%' + @searchTerm + '%' OR
-         a.reference_number LIKE '%' + @searchTerm + '%' OR
-         ac.category_name LIKE '%' + @searchTerm + '%'
+         a.description LIKE '%' || @searchTerm || '%' OR
+         a.reference_number LIKE '%' || @searchTerm || '%' OR
+         ac.category_name LIKE '%' || @searchTerm || '%'
        )
        ORDER BY a.transaction_date DESC, a.created_at DESC`,
       { parishId, searchTerm }

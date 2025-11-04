@@ -198,9 +198,9 @@ export class ParishModel {
     const result = await database.executeQuery<IParish>(
       `SELECT * FROM parishes
        WHERE is_active = TRUE AND (
-         parish_name LIKE '%' + @searchTerm + '%' OR
-         city LIKE '%' + @searchTerm + '%' OR
-         state LIKE '%' + @searchTerm + '%'
+         parish_name LIKE '%' || @searchTerm || '%' OR
+         city LIKE '%' || @searchTerm || '%' OR
+         state LIKE '%' || @searchTerm || '%'
        )
        ORDER BY parish_name ASC`,
       { searchTerm }
