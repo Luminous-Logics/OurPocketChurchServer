@@ -61,12 +61,12 @@ export class ParishModel {
         postal_code, phone, email, website_url, established_date, patron_saint,
         timezone, subscription_plan, subscription_expiry
       )
-       RETURNING parish_id
        VALUES (
         @parish_name, @diocese, @address_line1, @address_line2, @city, @state, @country,
         @postal_code, @phone, @email, @website_url, @established_date, @patron_saint,
         @timezone, @subscription_plan, @subscription_expiry
-      )`,
+      )
+       RETURNING parish_id`,
       parishData
     );
 
