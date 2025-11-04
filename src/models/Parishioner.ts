@@ -285,8 +285,8 @@ export class ParishionerModel {
     const fieldParams = fields.map((f) => `@${f}`).join(', ');
     const result = await database.executeQuery<{ parishioner_id: number }>(
       `INSERT INTO parishioners (${fieldNames})
-       RETURNING parishioner_id
-       VALUES (${fieldParams})`,
+       VALUES (${fieldParams})
+       RETURNING parishioner_id`,
       params
     );
 

@@ -117,8 +117,8 @@ export class WardModel {
 
     const result = await database.executeQuery<{ ward_id: number }>(
       `INSERT INTO wards (${fieldNames})
-       RETURNING ward_id
-       VALUES (${fieldParams})`,
+       VALUES (${fieldParams})
+       RETURNING ward_id`,
       params
     );
 

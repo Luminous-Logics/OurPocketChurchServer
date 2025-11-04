@@ -236,8 +236,8 @@ export class PrayerRequestModel {
 
     const result = await database.executeQuery<{ prayer_request_id: number }>(
       `INSERT INTO prayer_requests (${fieldNames})
-       RETURNING prayer_request_id
-       VALUES (${fieldParams})`,
+       VALUES (${fieldParams})
+       RETURNING prayer_request_id`,
       params
     );
 
