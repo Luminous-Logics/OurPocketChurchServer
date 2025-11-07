@@ -64,6 +64,14 @@ export interface IAuthResponse {
   };
 }
 
+// Parish Subscription Status
+export enum SubscriptionStatus {
+  PENDING = 'PENDING',       // Parish registered, awaiting first subscription payment
+  ACTIVE = 'ACTIVE',         // Subscription is active and paid, full access granted
+  SUSPENDED = 'SUSPENDED',   // Subscription payment failed or expired, access restricted
+  CANCELLED = 'CANCELLED'    // Subscription cancelled by parish or admin
+}
+
 // Parish
 export interface IParish {
   parish_id: number;
@@ -81,8 +89,12 @@ export interface IParish {
   established_date?: Date;
   patron_saint?: string;
   timezone: string;
-  subscription_plan?: string;
-  subscription_expiry?: Date;
+
+  // Razorpay subscription fields
+  is_subscription_managed?: boolean;  // TRUE if using Razorpay subscriptions
+  current_plan_id?: number;  // Foreign key to subscription_plans table
+  subscription_status: SubscriptionStatus; // Current subscription status
+
   is_active: boolean;
   created_at: Date;
   updated_at: Date;
@@ -689,3 +701,7 @@ export interface IUserReadingPlanSubscription {
   created_at: Date;
   updated_at: Date;
 }
+
+// =====================================================
+// RAZORPAY SUBSCRIPTION TYPES (Added: 2025-01-04)
+// =====================================================

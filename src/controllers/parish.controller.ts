@@ -8,6 +8,7 @@ import { IAuthRequest, UserType } from '../types';
 import { SYSTEM_ROLES } from '../constants/roles';
 import { PasswordUtil } from '../utils/password';
 import logger from '../utils/logger';
+import subscriptionService from '../services/subscription.service';
 
 export class ParishController {
   /**
@@ -202,13 +203,95 @@ export class ParishController {
         }
       }
 
+      // Check if subscription details are provided in the request
+      const {
+        plan_id,
+        payment_method,
+        billing_cycle,
+        billing_name,
+        billing_email,
+        billing_phone,
+        billing_address,
+        billing_city,
+        billing_state,
+        billing_pincode,
+        billing_country,
+      } = req.body;
+
+      let subscriptionData = null;
+
+      // If subscription details provided, create subscription automatically
+      if (plan_id && billing_cycle && billing_name && billing_email && billing_phone) {
+        try {
+          logger.info('Creating subscription during parish registration', {
+            parishId: parish.parish_id,
+            planId: plan_id,
+            paymentMethod: payment_method || 'online',
+          });
+
+          const subscription = await subscriptionService.createParishSubscription(
+            {
+              parish_id: parish.parish_id,
+              plan_id,
+              payment_method: payment_method || 'online',
+              billing_cycle,
+              billing_name,
+              billing_email,
+              billing_phone,
+              billing_address,
+              billing_city,
+              billing_state,
+              billing_pincode,
+              billing_country,
+            },
+            adminUser?.user_id || 1 // Use admin user_id or default to 1 (super admin)
+          );
+
+          subscriptionData = subscription;
+
+          logger.info('Subscription created successfully during parish registration', {
+            parishId: parish.parish_id,
+            subscriptionId: subscription.subscription.subscription_id,
+          });
+        } catch (subscriptionError) {
+          logger.error('Failed to create subscription during parish registration', {
+            parishId: parish.parish_id,
+            error: subscriptionError instanceof Error ? subscriptionError.message : String(subscriptionError),
+            stack: subscriptionError instanceof Error ? subscriptionError.stack : undefined,
+            subscriptionData: {
+              plan_id,
+              billing_cycle,
+              billing_name,
+              billing_email,
+              billing_phone,
+            },
+          });
+          // Don't fail parish creation if subscription fails
+          // User can create subscription later
+        }
+      }
+
+      // Determine message based on payment method
+      let responseMessage = 'Parish created successfully.';
+      if (subscriptionData) {
+        responseMessage = subscriptionData.payment_method === 'cash'
+          ? 'Parish registered successfully! Please complete cash payment to activate your subscription.'
+          : 'Parish registered successfully! Complete online payment to activate your account.';
+      } else if (adminUser) {
+        responseMessage = 'Parish registration successful! Please complete payment to activate your subscription.';
+      }
+
       res.status(201).json({
         success: true,
-        message: adminUser
-          ? 'Parish and admin user created successfully. Admin can now login with provided credentials.'
-          : 'Parish created successfully. You can add an admin user later.',
+        message: responseMessage,
         data: {
-          parish,
+          parish: {
+            parish_id: parish.parish_id,
+            parish_name: parish.parish_name,
+            email: parish.email,
+            subscription_status: parish.subscription_status, // Will be 'PENDING'
+            is_subscription_managed: parish.is_subscription_managed,
+          },
           admin: adminUser
             ? {
                 user_id: adminUser.user_id,
@@ -220,6 +303,53 @@ export class ParishController {
                 is_primary_admin: churchAdmin?.is_primary_admin,
               }
             : null,
+          // Include subscription and checkout data if subscription was created
+          ...(subscriptionData && {
+            subscription: {
+              subscription_id: subscriptionData.subscription.subscription_id,
+              payment_method: subscriptionData.payment_method,
+              razorpay_subscription_id: subscriptionData.razorpay_subscription_id,
+              plan_name: subscriptionData.plan.plan_name,
+              amount: subscriptionData.plan.amount,
+              billing_cycle: subscriptionData.plan.billing_cycle,
+            },
+            // Include Razorpay data only for online payments
+            ...(subscriptionData.payment_method === 'online' && {
+              razorpay_subscription_id: subscriptionData.razorpay_subscription_id,
+              razorpay_key_id: subscriptionData.razorpay_key_id,
+              razorpay_subscription: subscriptionData.razorpay_subscription,
+            }),
+
+            // Checkout instructions
+            checkout_info: subscriptionData.checkout_info,
+          }),
+          next_steps: subscriptionData
+            ? subscriptionData.payment_method === 'cash'
+              ? {
+                  message: 'Cash payment selected',
+                  steps: subscriptionData.checkout_info.next_steps,
+                }
+              : {
+                  message: 'Complete online payment to activate your account',
+                  steps: [
+                    '1. Use razorpay_subscription_id and razorpay_key_id to open Razorpay checkout',
+                    '2. Complete payment using your preferred method',
+                    '3. Verify payment by calling POST /subscriptions/verify-payment',
+                    '4. Your account will be activated automatically',
+                    '5. Login and start managing your parish',
+                  ],
+                }
+            : {
+                message: 'To activate your parish account, please:',
+                steps: [
+                  '1. View available subscription plans at GET /subscriptions/plans',
+                  '2. Create a subscription for your parish at POST /subscriptions',
+                  '3. Complete payment via online or cash payment',
+                  '4. Your account will be activated upon payment confirmation',
+                ],
+                subscription_plans_endpoint: '/subscriptions/plans',
+                create_subscription_endpoint: '/subscriptions',
+              },
         },
       });
     } catch (error) {
@@ -297,8 +427,8 @@ export class ParishController {
           parish_id: parish.parish_id,
           parish_name: parish.parish_name,
           is_active: parish.is_active,
-          subscription_plan: parish.subscription_plan,
-          subscription_expiry: parish.subscription_expiry,
+          is_subscription_managed: parish.is_subscription_managed,
+          current_plan_id: parish.current_plan_id,
           created_at: parish.created_at,
         },
       });

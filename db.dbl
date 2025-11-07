@@ -31,8 +31,10 @@ Table parishes {
   established_date date
   patron_saint nvarchar(200)
   timezone nvarchar(50) [default: 'UTC']
-  subscription_plan nvarchar(50) [note: 'basic, premium, enterprise']
-  subscription_expiry date
+  subscription_plan nvarchar(50) [note: 'DEPRECATED: Use current_plan_id instead']
+  subscription_expiry date [note: 'DEPRECATED: Use parish_subscriptions table']
+  current_plan_id bigint [ref: > subscription_plans.plan_id, note: 'Current subscription plan FK']
+  is_subscription_managed bit [default: 0, note: 'TRUE if managed via Razorpay']
   is_active bit [default: 1]
   created_at datetime2 [default: `getdate()`]
   updated_at datetime2 [default: `getdate()`]
@@ -432,4 +434,221 @@ Table deleted_parish {
   deleted_at datetime2 [default: `getdate()`]
   created_at datetime2
   updated_at datetime2
+}
+
+// =====================================================
+// RAZORPAY SUBSCRIPTION TABLES (Migration 003)
+// Added: 2025-01-04
+// =====================================================
+
+Table subscription_plans {
+  plan_id bigint [pk, increment]
+  plan_name nvarchar(100) [not null]
+  plan_code nvarchar(50) [unique, not null]
+  razorpay_plan_id nvarchar(255) [unique, note: 'Razorpay plan ID']
+  description nvarchar(max)
+  amount decimal(15,2) [not null]
+  currency nvarchar(3) [default: 'INR']
+  billing_cycle nvarchar(20) [not null, note: 'monthly, yearly, quarterly']
+
+  // Feature limits
+  features nvarchar(max) [note: 'JSON array of features']
+  max_parishioners int
+  max_families int
+  max_wards int
+  max_users int
+  max_storage_gb int
+
+  // Trial settings
+  trial_period_days int [default: 0]
+
+  // Status
+  is_active bit [default: 1]
+  is_featured bit [default: 0]
+  display_order int [default: 0]
+
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+}
+
+Table parish_subscriptions {
+  subscription_id bigint [pk, increment]
+  parish_id bigint [unique, not null, ref: > parishes.parish_id]
+  plan_id bigint [not null, ref: > subscription_plans.plan_id]
+
+  // Payment method
+  payment_method nvarchar(20) [not null, default: 'online', note: 'online (Razorpay) or cash (manual payment verification)']
+
+  // Razorpay references
+  razorpay_subscription_id nvarchar(255) [unique, note: 'Razorpay subscription ID']
+  razorpay_customer_id nvarchar(255) [note: 'Razorpay customer ID']
+
+  // Billing contact
+  billing_contact_user_id bigint [ref: > users.user_id]
+  billing_email nvarchar(255)
+  billing_phone nvarchar(20)
+
+  // Billing address
+  billing_address_line1 nvarchar(255)
+  billing_address_line2 nvarchar(255)
+  billing_city nvarchar(100)
+  billing_state nvarchar(100)
+  billing_country nvarchar(100) [default: 'India']
+  billing_postal_code nvarchar(20)
+
+  // Tax information
+  tax_identification_number nvarchar(50) [note: 'GSTIN for India']
+  company_name nvarchar(200)
+
+  // Subscription status
+  subscription_status nvarchar(50) [not null, default: 'pending', note: 'created, authenticated, active, paused, halted, cancelled, expired, pending']
+
+  // Subscription dates
+  start_date date [not null]
+  trial_start_date date
+  trial_end_date date
+  current_period_start date
+  current_period_end date
+  next_billing_date date
+  last_payment_date date
+  cancellation_date date
+  expiry_date date
+
+  // Cancellation details
+  cancellation_reason nvarchar(max)
+  cancelled_by bigint [ref: > users.user_id]
+
+  // Settings
+  auto_renewal bit [default: 1]
+
+  // Metrics
+  payment_failed_count int [default: 0]
+  total_paid decimal(15,2) [default: 0]
+  total_invoices int [default: 0]
+
+  notes nvarchar(max)
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+
+  indexes {
+    parish_id
+    razorpay_subscription_id
+    payment_method
+    subscription_status
+    next_billing_date
+    expiry_date
+  }
+}
+
+Table subscription_payments {
+  payment_id bigint [pk, increment]
+  subscription_id bigint [not null, ref: > parish_subscriptions.subscription_id]
+  parish_id bigint [not null, ref: > parishes.parish_id]
+
+  // Razorpay references
+  razorpay_payment_id nvarchar(255) [unique]
+  razorpay_order_id nvarchar(255)
+  razorpay_invoice_id nvarchar(255)
+
+  // Payment details
+  amount decimal(15,2) [not null]
+  currency nvarchar(3) [default: 'INR']
+  amount_paid decimal(15,2)
+  amount_due decimal(15,2)
+  tax_amount decimal(15,2)
+
+  // Payment method and status
+  payment_method nvarchar(50) [note: 'card, netbanking, upi, wallet, etc.']
+  payment_status nvarchar(50) [not null, default: 'pending', note: 'created, authorized, captured, failed, refunded, pending']
+
+  // Invoice details
+  invoice_number nvarchar(100) [unique]
+  receipt_number nvarchar(100)
+  invoice_date date
+  due_date date
+  paid_on date
+
+  // Additional info
+  description nvarchar(max)
+  notes nvarchar(max)
+  failure_reason nvarchar(max)
+
+  // Refund details
+  refund_amount decimal(15,2)
+  refund_date date
+  refund_reason nvarchar(max)
+
+  created_at datetime2 [default: `getdate()`]
+  updated_at datetime2 [default: `getdate()`]
+
+  indexes {
+    subscription_id
+    parish_id
+    razorpay_payment_id
+    payment_status
+    paid_on
+    invoice_number
+  }
+}
+
+Table razorpay_webhook_logs {
+  log_id bigint [pk, increment]
+
+  // Webhook event details
+  event_id nvarchar(255) [unique, note: 'Razorpay event ID']
+  event_type nvarchar(100) [not null, note: 'subscription.activated, payment.captured, etc.']
+  entity_type nvarchar(50) [not null, note: 'subscription, payment, invoice, etc.']
+  entity_id nvarchar(255) [not null]
+
+  // Payload
+  payload nvarchar(max) [not null, note: 'Full webhook payload as JSON']
+
+  // Processing status
+  processed bit [default: 0]
+  processing_error nvarchar(max)
+  retry_count int [default: 0]
+
+  // Related records
+  parish_id bigint [ref: > parishes.parish_id]
+  subscription_id bigint [ref: > parish_subscriptions.subscription_id]
+  payment_id bigint [ref: > subscription_payments.payment_id]
+
+  created_at datetime2 [default: `getdate()`]
+  processed_at datetime2
+
+  indexes {
+    event_id
+    event_type
+    entity_id
+    processed
+    created_at
+  }
+}
+
+Table subscription_history {
+  history_id bigint [pk, increment]
+  subscription_id bigint [not null, ref: > parish_subscriptions.subscription_id]
+  parish_id bigint [not null, ref: > parishes.parish_id]
+
+  // Change details
+  action nvarchar(50) [not null, note: 'created, activated, paused, resumed, cancelled, expired, plan_changed, payment_failed, payment_succeeded']
+  old_status nvarchar(50)
+  new_status nvarchar(50)
+  old_plan_id bigint [ref: > subscription_plans.plan_id]
+  new_plan_id bigint [ref: > subscription_plans.plan_id]
+
+  // Details
+  description nvarchar(max)
+  metadata nvarchar(max) [note: 'JSON metadata']
+
+  // Actor
+  performed_by bigint [ref: > users.user_id]
+  performed_at datetime2 [default: `getdate()`]
+
+  indexes {
+    subscription_id
+    parish_id
+    action
+    performed_at
+  }
 }

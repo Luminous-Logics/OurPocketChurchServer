@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import database from '../config/database';
-import { IParish } from '../types';
+import { IParish, SubscriptionStatus } from '../types';
 import { ApiError } from '../utils/apiError';
 import { ChurchAdminModel } from './ChurchAdmin';
 
@@ -52,22 +52,30 @@ export class ParishModel {
     established_date?: Date;
     patron_saint?: string;
     timezone?: string;
-    subscription_plan?: string;
-    subscription_expiry?: Date;
+    is_subscription_managed?: boolean;
+    current_plan_id?: number;
+    subscription_status?: SubscriptionStatus;
   }): Promise<IParish> {
+    // Default to PENDING status - parish must complete payment to become ACTIVE
+    const defaultData = {
+      ...parishData,
+      subscription_status: parishData.subscription_status || SubscriptionStatus.PENDING,
+      is_subscription_managed: parishData.is_subscription_managed ?? true, // Default to Razorpay managed
+    };
+
     const result = await database.executeQuery<{ parish_id: number }>(
       `INSERT INTO parishes (
         parish_name, diocese, address_line1, address_line2, city, state, country,
         postal_code, phone, email, website_url, established_date, patron_saint,
-        timezone, subscription_plan, subscription_expiry
+        timezone, is_subscription_managed, current_plan_id, subscription_status
       )
        VALUES (
         @parish_name, @diocese, @address_line1, @address_line2, @city, @state, @country,
         @postal_code, @phone, @email, @website_url, @established_date, @patron_saint,
-        @timezone, @subscription_plan, @subscription_expiry
+        @timezone, @is_subscription_managed, @current_plan_id, @subscription_status
       )
        RETURNING parish_id`,
-      parishData
+      defaultData
     );
 
     const parishId = result.rows[0].parish_id;
@@ -140,12 +148,12 @@ export class ParishModel {
   `INSERT INTO deleted_parish (
     parish_id, parish_name, diocese, address_line1, address_line2, city, state, country,
     postal_code, phone, email, website_url, established_date, patron_saint, timezone,
-    subscription_plan, subscription_expiry, deleted_by, created_at, updated_at
+    is_subscription_managed, current_plan_id, subscription_status, deleted_by, created_at, updated_at
   )
   VALUES (
     @parish_id, @parish_name, @diocese, @address_line1, @address_line2, @city, @state, @country,
     @postal_code, @phone, @email, @website_url, @established_date, @patron_saint, @timezone,
-    @subscription_plan, @subscription_expiry, @deleted_by, @created_at, @updated_at
+    @is_subscription_managed, @current_plan_id, @subscription_status, @deleted_by, @created_at, @updated_at
   )`,
   {
     parish_id: parish.parish_id,
@@ -163,8 +171,9 @@ export class ParishModel {
     established_date: parish.established_date,
     patron_saint: parish.patron_saint,
     timezone: parish.timezone,
-    subscription_plan: parish.subscription_plan,
-    subscription_expiry: parish.subscription_expiry,
+    is_subscription_managed: parish.is_subscription_managed,
+    current_plan_id: parish.current_plan_id,
+    subscription_status: parish.subscription_status,
     deleted_by: deletedBy || null,
     created_at: parish.created_at,
     updated_at: parish.updated_at,

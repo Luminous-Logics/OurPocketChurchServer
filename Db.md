@@ -1,4 +1,25 @@
--- PostgreSQL Database Schema for Church Management System
+-- =====================================================
+-- PostgreSQL Database Schema for Parish Management System
+-- Complete schema with Razorpay Subscription Integration
+-- Last Updated: 2025-11-05
+-- =====================================================
+
+-- =====================================================
+-- STEP 1: CREATE ENUM TYPES
+-- =====================================================
+
+CREATE TYPE subscription_status_enum AS ENUM (
+    'PENDING',      -- Parish registered, awaiting first subscription payment
+    'ACTIVE',       -- Subscription is active and paid, full access granted
+    'SUSPENDED',    -- Subscription payment failed or expired, access restricted
+    'CANCELLED'     -- Subscription cancelled by parish or admin
+);
+
+COMMENT ON TYPE subscription_status_enum IS 'Parish subscription status for access control';
+
+-- =====================================================
+-- STEP 2: CREATE CORE TABLES
+-- =====================================================
 
 -- Create users table
 CREATE TABLE users (
@@ -17,6 +38,51 @@ CREATE TABLE users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+COMMENT ON TABLE users IS 'User accounts for system access';
+COMMENT ON COLUMN users.user_type IS 'User role: super_admin (system admin), church_admin (parish admin), parishioner (member)';
+
+-- =====================================================
+-- SUBSCRIPTION PLANS TABLE
+-- =====================================================
+
+CREATE TABLE subscription_plans (
+    plan_id BIGSERIAL PRIMARY KEY,
+    plan_name VARCHAR(100) NOT NULL,
+    plan_code VARCHAR(50) UNIQUE NOT NULL,
+    tier VARCHAR(20) NOT NULL CHECK (tier IN ('basic', 'standard', 'premium', 'enterprise')),
+    razorpay_plan_id VARCHAR(255) UNIQUE, -- Razorpay plan ID
+    description TEXT,
+    amount DECIMAL(15,2) NOT NULL,
+    currency VARCHAR(3) DEFAULT 'INR',
+    billing_cycle VARCHAR(20) NOT NULL CHECK (billing_cycle IN ('monthly', 'yearly', 'quarterly')),
+
+    -- Feature limits
+    features JSONB, -- JSON array of feature descriptions
+    max_parishioners INTEGER NOT NULL DEFAULT 0,
+    max_families INTEGER NOT NULL DEFAULT 0,
+    max_wards INTEGER,
+    max_admins INTEGER NOT NULL DEFAULT 1,
+    max_users INTEGER,
+    max_storage_gb INTEGER NOT NULL DEFAULT 1,
+
+    -- Trial settings
+    trial_period_days INTEGER DEFAULT 0,
+
+    -- Status
+    is_active BOOLEAN DEFAULT TRUE,
+    is_featured BOOLEAN DEFAULT FALSE,
+    display_order INTEGER DEFAULT 0,
+
+    -- Metadata
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE subscription_plans IS 'Subscription plans available for parishes';
+COMMENT ON COLUMN subscription_plans.razorpay_plan_id IS 'Razorpay plan ID for subscription creation';
+COMMENT ON COLUMN subscription_plans.features IS 'JSON array of features included in this plan';
+COMMENT ON COLUMN subscription_plans.billing_cycle IS 'Billing frequency: monthly, yearly, quarterly';
+
 -- Create parishes table
 CREATE TABLE parishes (
     parish_id BIGSERIAL PRIMARY KEY,
@@ -34,12 +100,218 @@ CREATE TABLE parishes (
     established_date DATE,
     patron_saint VARCHAR(200),
     timezone VARCHAR(50) DEFAULT 'UTC',
-    subscription_plan VARCHAR(50) CHECK (subscription_plan IN ('basic', 'premium', 'enterprise')),
-    subscription_expiry DATE,
+
+    -- Subscription management columns
+    is_subscription_managed BOOLEAN DEFAULT TRUE,  -- TRUE if using Razorpay subscriptions
+    current_plan_id BIGINT REFERENCES subscription_plans(plan_id),  -- Current active plan
+    subscription_status subscription_status_enum NOT NULL DEFAULT 'PENDING',  -- Payment status
+
     is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- Constraint: ACTIVE subscriptions must have a plan
+    CONSTRAINT chk_active_subscription_has_plan CHECK (
+        subscription_status != 'ACTIVE' OR
+        (subscription_status = 'ACTIVE' AND current_plan_id IS NOT NULL)
+    )
+);
+
+COMMENT ON TABLE parishes IS 'Parish organizations with mandatory subscription management';
+COMMENT ON COLUMN parishes.is_subscription_managed IS 'TRUE if subscription is managed through Razorpay';
+COMMENT ON COLUMN parishes.current_plan_id IS 'Current active subscription plan (references subscription_plans table)';
+COMMENT ON COLUMN parishes.subscription_status IS 'Current subscription status - PENDING (awaiting payment), ACTIVE (paid), SUSPENDED (payment failed), CANCELLED';
+
+-- =====================================================
+-- PARISH SUBSCRIPTIONS TABLE
+-- =====================================================
+
+CREATE TABLE parish_subscriptions (
+    subscription_id BIGSERIAL PRIMARY KEY,
+    parish_id BIGINT NOT NULL UNIQUE REFERENCES parishes(parish_id) ON DELETE CASCADE,
+    plan_id BIGINT NOT NULL REFERENCES subscription_plans(plan_id),
+
+    -- Payment method
+    payment_method VARCHAR(20) NOT NULL DEFAULT 'online' CHECK (payment_method IN ('online', 'cash')),
+
+    -- Razorpay references
+    razorpay_subscription_id VARCHAR(255) UNIQUE,
+    razorpay_customer_id VARCHAR(255),
+
+    -- Billing contact
+    billing_contact_user_id BIGINT REFERENCES users(user_id),
+    billing_email VARCHAR(255),
+    billing_phone VARCHAR(20),
+
+    -- Billing address
+    billing_address_line1 VARCHAR(255),
+    billing_address_line2 VARCHAR(255),
+    billing_city VARCHAR(100),
+    billing_state VARCHAR(100),
+    billing_country VARCHAR(100) DEFAULT 'India',
+    billing_postal_code VARCHAR(20),
+
+    -- Tax information
+    tax_identification_number VARCHAR(50), -- GSTIN for India
+    company_name VARCHAR(200), -- Legal entity name
+
+    -- Subscription status
+    subscription_status VARCHAR(50) NOT NULL DEFAULT 'pending' CHECK (
+        subscription_status IN ('created', 'authenticated', 'active', 'paused', 'halted', 'cancelled', 'expired', 'pending')
+    ),
+
+    -- Subscription dates
+    start_date DATE NOT NULL,
+    trial_start_date DATE,
+    trial_end_date DATE,
+    current_period_start DATE,
+    current_period_end DATE,
+    next_billing_date DATE,
+    last_payment_date DATE,
+    cancellation_date DATE,
+    expiry_date DATE,
+
+    -- Cancellation details
+    cancellation_reason TEXT,
+    cancelled_by BIGINT REFERENCES users(user_id),
+
+    -- Settings
+    auto_renewal BOOLEAN DEFAULT TRUE,
+
+    -- Metrics
+    payment_failed_count INTEGER DEFAULT 0,
+    total_paid DECIMAL(15,2) DEFAULT 0,
+    total_invoices INTEGER DEFAULT 0,
+
+    -- Metadata
+    notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+COMMENT ON TABLE parish_subscriptions IS 'Parish subscription records linked to Razorpay';
+COMMENT ON COLUMN parish_subscriptions.payment_method IS 'Payment method: online (Razorpay) or cash (manual payment verification)';
+COMMENT ON COLUMN parish_subscriptions.subscription_status IS 'created: Created but not authenticated | authenticated: Authorized but not started | active: Currently active | paused: Temporarily paused | halted: Halted due to payment failure | cancelled: Cancelled by user | expired: Subscription expired';
+COMMENT ON COLUMN parish_subscriptions.razorpay_subscription_id IS 'Unique subscription ID from Razorpay';
+COMMENT ON COLUMN parish_subscriptions.razorpay_customer_id IS 'Razorpay customer ID for the parish';
+
+-- =====================================================
+-- SUBSCRIPTION PAYMENTS TABLE
+-- =====================================================
+
+CREATE TABLE subscription_payments (
+    payment_id BIGSERIAL PRIMARY KEY,
+    subscription_id BIGINT NOT NULL REFERENCES parish_subscriptions(subscription_id) ON DELETE CASCADE,
+    parish_id BIGINT NOT NULL REFERENCES parishes(parish_id) ON DELETE CASCADE,
+
+    -- Razorpay references
+    razorpay_payment_id VARCHAR(255) UNIQUE,
+    razorpay_order_id VARCHAR(255),
+    razorpay_invoice_id VARCHAR(255),
+
+    -- Payment details
+    amount DECIMAL(15,2) NOT NULL,
+    currency VARCHAR(3) DEFAULT 'INR',
+    amount_paid DECIMAL(15,2),
+    amount_due DECIMAL(15,2),
+
+    -- Tax details
+    tax_amount DECIMAL(15,2),
+
+    -- Payment method and status
+    payment_method VARCHAR(50), -- card, netbanking, upi, wallet, etc.
+    payment_status VARCHAR(50) NOT NULL DEFAULT 'pending' CHECK (
+        payment_status IN ('created', 'authorized', 'captured', 'failed', 'refunded', 'pending')
+    ),
+
+    -- Invoice details
+    invoice_number VARCHAR(100) UNIQUE,
+    receipt_number VARCHAR(100),
+    invoice_date DATE,
+    due_date DATE,
+    paid_on DATE,
+
+    -- Additional info
+    description TEXT,
+    notes TEXT,
+    failure_reason TEXT,
+
+    -- Refund details
+    refund_amount DECIMAL(15,2),
+    refund_date DATE,
+    refund_reason TEXT,
+
+    -- Metadata
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE subscription_payments IS 'Payment transactions for parish subscriptions';
+COMMENT ON COLUMN subscription_payments.payment_status IS 'created: Payment created | authorized: Payment authorized | captured: Payment successful | failed: Payment failed | refunded: Payment refunded';
+
+-- =====================================================
+-- RAZORPAY WEBHOOK LOGS TABLE
+-- =====================================================
+
+CREATE TABLE razorpay_webhook_logs (
+    log_id BIGSERIAL PRIMARY KEY,
+
+    -- Webhook event details
+    event_id VARCHAR(255) UNIQUE, -- Razorpay event ID
+    event_type VARCHAR(100) NOT NULL, -- subscription.activated, payment.captured, etc.
+    entity_type VARCHAR(50) NOT NULL, -- subscription, payment, invoice, etc.
+    entity_id VARCHAR(255) NOT NULL, -- ID of the entity
+
+    -- Payload
+    payload JSONB NOT NULL, -- Full webhook payload as JSON
+
+    -- Processing status
+    processed BOOLEAN DEFAULT FALSE,
+    processing_error TEXT,
+    retry_count INTEGER DEFAULT 0,
+
+    -- Related records
+    parish_id BIGINT REFERENCES parishes(parish_id),
+    subscription_id BIGINT REFERENCES parish_subscriptions(subscription_id),
+    payment_id BIGINT REFERENCES subscription_payments(payment_id),
+
+    -- Metadata
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    processed_at TIMESTAMP
+);
+
+COMMENT ON TABLE razorpay_webhook_logs IS 'Logs all webhook events received from Razorpay for audit and debugging';
+COMMENT ON COLUMN razorpay_webhook_logs.event_type IS 'Type of webhook event (e.g., subscription.activated, payment.captured)';
+COMMENT ON COLUMN razorpay_webhook_logs.payload IS 'Complete webhook payload as JSON for debugging';
+
+-- =====================================================
+-- SUBSCRIPTION HISTORY TABLE (Audit Trail)
+-- =====================================================
+
+CREATE TABLE subscription_history (
+    history_id BIGSERIAL PRIMARY KEY,
+    subscription_id BIGINT NOT NULL REFERENCES parish_subscriptions(subscription_id) ON DELETE CASCADE,
+    parish_id BIGINT NOT NULL REFERENCES parishes(parish_id),
+
+    -- Change details
+    action VARCHAR(50) NOT NULL CHECK (
+        action IN ('created', 'activated', 'paused', 'resumed', 'cancelled', 'expired', 'plan_changed', 'payment_failed', 'payment_succeeded')
+    ),
+    old_status VARCHAR(50),
+    new_status VARCHAR(50),
+    old_plan_id BIGINT REFERENCES subscription_plans(plan_id),
+    new_plan_id BIGINT REFERENCES subscription_plans(plan_id),
+
+    -- Details
+    description TEXT,
+    metadata JSONB,
+
+    -- Actor
+    performed_by BIGINT REFERENCES users(user_id),
+    performed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE subscription_history IS 'Audit trail of all subscription changes';
 
 -- Create church_admins table
 CREATE TABLE church_admins (
@@ -56,6 +328,8 @@ CREATE TABLE church_admins (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+COMMENT ON TABLE church_admins IS 'Parish administrators with extended permissions';
+
 -- Create wards table
 CREATE TABLE wards (
     ward_id BIGSERIAL PRIMARY KEY,
@@ -71,6 +345,8 @@ CREATE TABLE wards (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+COMMENT ON TABLE wards IS 'Geographical divisions within parishes';
 
 -- Create families table
 CREATE TABLE families (
@@ -93,6 +369,8 @@ CREATE TABLE families (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+COMMENT ON TABLE families IS 'Family units within parishes';
 
 -- Create parishioners table
 CREATE TABLE parishioners (
@@ -131,9 +409,11 @@ CREATE TABLE parishioners (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+COMMENT ON TABLE parishioners IS 'Individual parish members';
+
 -- Add foreign key constraint for families.primary_contact_id after parishioners table is created
-ALTER TABLE families 
-ADD CONSTRAINT fk_families_primary_contact 
+ALTER TABLE families
+ADD CONSTRAINT fk_families_primary_contact
 FOREIGN KEY (primary_contact_id) REFERENCES parishioners(parishioner_id);
 
 -- Create roles table
@@ -154,6 +434,8 @@ CREATE TABLE roles (
     UNIQUE (role_code, parish_id)
 );
 
+COMMENT ON TABLE roles IS 'User roles for access control';
+
 -- Create permissions table
 CREATE TABLE permissions (
     permission_id BIGSERIAL PRIMARY KEY,
@@ -165,6 +447,8 @@ CREATE TABLE permissions (
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+COMMENT ON TABLE permissions IS 'Granular permissions for system access';
 
 -- Create user_roles table
 CREATE TABLE user_roles (
@@ -178,6 +462,8 @@ CREATE TABLE user_roles (
     UNIQUE (user_id, role_id)
 );
 
+COMMENT ON TABLE user_roles IS 'User role assignments';
+
 -- Create role_permissions table
 CREATE TABLE role_permissions (
     role_permission_id BIGSERIAL PRIMARY KEY,
@@ -187,6 +473,8 @@ CREATE TABLE role_permissions (
     granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (role_id, permission_id)
 );
+
+COMMENT ON TABLE role_permissions IS 'Permissions assigned to roles';
 
 -- Create user_permissions table
 CREATE TABLE user_permissions (
@@ -201,6 +489,8 @@ CREATE TABLE user_permissions (
     is_active BOOLEAN DEFAULT TRUE,
     UNIQUE (user_id, permission_id)
 );
+
+COMMENT ON TABLE user_permissions IS 'Direct user permission grants/revokes';
 
 -- Create ward_roles table
 CREATE TABLE ward_roles (
@@ -220,6 +510,8 @@ CREATE TABLE ward_roles (
     UNIQUE (ward_id, parishioner_id, role_id)
 );
 
+COMMENT ON TABLE ward_roles IS 'Ward-specific role assignments';
+
 -- Create account_categories table
 CREATE TABLE account_categories (
     category_id BIGSERIAL PRIMARY KEY,
@@ -232,6 +524,8 @@ CREATE TABLE account_categories (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (category_name, category_type)
 );
+
+COMMENT ON TABLE account_categories IS 'Categories for financial transactions';
 
 -- Create accounts table
 CREATE TABLE accounts (
@@ -249,6 +543,8 @@ CREATE TABLE accounts (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+COMMENT ON TABLE accounts IS 'Financial transactions for parishes';
 
 -- Create prayer_requests table
 CREATE TABLE prayer_requests (
@@ -269,6 +565,8 @@ CREATE TABLE prayer_requests (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+COMMENT ON TABLE prayer_requests IS 'Prayer requests from parishioners';
 
 -- Create audiobooks table
 CREATE TABLE audiobooks (
@@ -291,6 +589,8 @@ CREATE TABLE audiobooks (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+COMMENT ON TABLE audiobooks IS 'Religious audiobooks available to parishioners';
+
 -- Create daily_bible_readings table
 CREATE TABLE daily_bible_readings (
     reading_id BIGSERIAL PRIMARY KEY,
@@ -310,6 +610,8 @@ CREATE TABLE daily_bible_readings (
     UNIQUE (parish_id, reading_date)
 );
 
+COMMENT ON TABLE daily_bible_readings IS 'Daily Bible readings for parishes';
+
 -- Create bible_bookmarks table
 CREATE TABLE bible_bookmarks (
     bookmark_id BIGSERIAL PRIMARY KEY,
@@ -326,6 +628,8 @@ CREATE TABLE bible_bookmarks (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+COMMENT ON TABLE bible_bookmarks IS 'User Bible bookmarks and highlights';
+
 -- Create bible_reading_history table
 CREATE TABLE bible_reading_history (
     history_id BIGSERIAL PRIMARY KEY,
@@ -340,6 +644,8 @@ CREATE TABLE bible_reading_history (
     completed BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+COMMENT ON TABLE bible_reading_history IS 'User Bible reading history';
 
 -- Create email_templates table
 CREATE TABLE email_templates (
@@ -358,6 +664,8 @@ CREATE TABLE email_templates (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+COMMENT ON TABLE email_templates IS 'Email templates for system notifications';
+
 -- Create email_queue table
 CREATE TABLE email_queue (
     queue_id BIGSERIAL PRIMARY KEY,
@@ -374,6 +682,8 @@ CREATE TABLE email_queue (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     processed_at TIMESTAMP
 );
+
+COMMENT ON TABLE email_queue IS 'Email queue for scheduled sending';
 
 -- Create email_logs table
 CREATE TABLE email_logs (
@@ -399,6 +709,8 @@ CREATE TABLE email_logs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+COMMENT ON TABLE email_logs IS 'Email delivery logs';
+
 -- Create otp_codes table
 CREATE TABLE otp_codes (
     otp_id BIGSERIAL PRIMARY KEY,
@@ -415,6 +727,8 @@ CREATE TABLE otp_codes (
     ip_address VARCHAR(50),
     attempts INTEGER DEFAULT 0
 );
+
+COMMENT ON TABLE otp_codes IS 'One-time password codes for authentication';
 
 -- Create deleted_parish table
 CREATE TABLE deleted_parish (
@@ -434,8 +748,13 @@ CREATE TABLE deleted_parish (
     established_date DATE,
     patron_saint VARCHAR(200),
     timezone VARCHAR(50),
-    subscription_plan VARCHAR(50),
-    subscription_expiry DATE,
+
+    -- Subscription columns
+    is_subscription_managed BOOLEAN DEFAULT TRUE,
+    current_plan_id INTEGER,
+    subscription_status VARCHAR(20),
+
+    -- Deletion metadata
     deleted_reason VARCHAR(255),
     deleted_by BIGINT REFERENCES users(user_id),
     deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -443,27 +762,93 @@ CREATE TABLE deleted_parish (
     updated_at TIMESTAMP
 );
 
--- Create indexes for better query performance
+COMMENT ON TABLE deleted_parish IS 'Archive of deleted parishes for audit trail';
+COMMENT ON COLUMN deleted_parish.is_subscription_managed IS 'TRUE if parish used Razorpay subscriptions';
+COMMENT ON COLUMN deleted_parish.current_plan_id IS 'Last active subscription plan ID before deletion';
+COMMENT ON COLUMN deleted_parish.subscription_status IS 'Subscription status at time of deletion (PENDING/ACTIVE/SUSPENDED/CANCELLED)';
+
+-- =====================================================
+-- STEP 3: CREATE INDEXES
+-- =====================================================
+
+-- Users indexes
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_user_type ON users(user_type);
+
+-- Parishes indexes
+CREATE INDEX idx_parishes_current_plan_id ON parishes(current_plan_id);
+CREATE INDEX idx_parishes_subscription_status ON parishes(subscription_status);
+
+-- Subscription plans indexes
+CREATE INDEX idx_subscription_plans_tier ON subscription_plans(tier);
+CREATE INDEX idx_subscription_plans_billing_cycle ON subscription_plans(billing_cycle);
+CREATE INDEX idx_subscription_plans_is_active ON subscription_plans(is_active);
+
+-- Parish subscriptions indexes
+CREATE INDEX idx_parish_subscriptions_parish_id ON parish_subscriptions(parish_id);
+CREATE INDEX idx_parish_subscriptions_razorpay_subscription_id ON parish_subscriptions(razorpay_subscription_id);
+CREATE INDEX idx_parish_subscriptions_status ON parish_subscriptions(subscription_status);
+CREATE INDEX idx_parish_subscriptions_next_billing_date ON parish_subscriptions(next_billing_date);
+CREATE INDEX idx_parish_subscriptions_expiry_date ON parish_subscriptions(expiry_date);
+
+-- Subscription payments indexes
+CREATE INDEX idx_subscription_payments_subscription_id ON subscription_payments(subscription_id);
+CREATE INDEX idx_subscription_payments_parish_id ON subscription_payments(parish_id);
+CREATE INDEX idx_subscription_payments_razorpay_payment_id ON subscription_payments(razorpay_payment_id);
+CREATE INDEX idx_subscription_payments_status ON subscription_payments(payment_status);
+CREATE INDEX idx_subscription_payments_paid_on ON subscription_payments(paid_on);
+CREATE INDEX idx_subscription_payments_invoice_number ON subscription_payments(invoice_number);
+
+-- Webhook logs indexes
+CREATE INDEX idx_webhook_logs_event_id ON razorpay_webhook_logs(event_id);
+CREATE INDEX idx_webhook_logs_event_type ON razorpay_webhook_logs(event_type);
+CREATE INDEX idx_webhook_logs_entity_id ON razorpay_webhook_logs(entity_id);
+CREATE INDEX idx_webhook_logs_processed ON razorpay_webhook_logs(processed);
+CREATE INDEX idx_webhook_logs_created_at ON razorpay_webhook_logs(created_at);
+
+-- Subscription history indexes
+CREATE INDEX idx_subscription_history_subscription_id ON subscription_history(subscription_id);
+CREATE INDEX idx_subscription_history_parish_id ON subscription_history(parish_id);
+CREATE INDEX idx_subscription_history_action ON subscription_history(action);
+CREATE INDEX idx_subscription_history_performed_at ON subscription_history(performed_at);
+
+-- Church admins indexes
 CREATE INDEX idx_church_admins_user_id ON church_admins(user_id);
 CREATE INDEX idx_church_admins_parish_id ON church_admins(parish_id);
+
+-- Parishioners indexes
 CREATE INDEX idx_parishioners_user_id ON parishioners(user_id);
 CREATE INDEX idx_parishioners_parish_id ON parishioners(parish_id);
 CREATE INDEX idx_parishioners_ward_id ON parishioners(ward_id);
 CREATE INDEX idx_parishioners_family_id ON parishioners(family_id);
+
+-- Families indexes
 CREATE INDEX idx_families_parish_id ON families(parish_id);
 CREATE INDEX idx_families_ward_id ON families(ward_id);
+
+-- Wards indexes
 CREATE INDEX idx_wards_parish_id ON wards(parish_id);
+
+-- Accounts indexes
 CREATE INDEX idx_accounts_parish_id ON accounts(parish_id);
 CREATE INDEX idx_accounts_transaction_date ON accounts(transaction_date);
+
+-- Prayer requests indexes
 CREATE INDEX idx_prayer_requests_parish_id ON prayer_requests(parish_id);
 CREATE INDEX idx_prayer_requests_status ON prayer_requests(status);
+
+-- Email queue indexes
 CREATE INDEX idx_email_queue_status ON email_queue(status);
+
+-- OTP codes indexes
 CREATE INDEX idx_otp_codes_user_id ON otp_codes(user_id);
 CREATE INDEX idx_otp_codes_expires_at ON otp_codes(expires_at);
 
--- Create function to update updated_at timestamp
+-- =====================================================
+-- STEP 4: CREATE FUNCTIONS
+-- =====================================================
+
+-- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -472,11 +857,95 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Create triggers for updated_at columns
+COMMENT ON FUNCTION update_updated_at_column IS 'Automatically updates updated_at column on row update';
+
+-- Function to get active subscription for a parish
+CREATE OR REPLACE FUNCTION get_active_subscription(p_parish_id BIGINT)
+RETURNS TABLE (
+    subscription_id BIGINT,
+    plan_name VARCHAR(100),
+    plan_code VARCHAR(50),
+    subscription_status VARCHAR(50),
+    current_period_end DATE,
+    is_trial BOOLEAN
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        ps.subscription_id,
+        sp.plan_name,
+        sp.plan_code,
+        ps.subscription_status,
+        ps.current_period_end,
+        (ps.trial_end_date IS NOT NULL AND CURRENT_DATE <= ps.trial_end_date) AS is_trial
+    FROM parish_subscriptions ps
+    JOIN subscription_plans sp ON ps.plan_id = sp.plan_id
+    WHERE ps.parish_id = p_parish_id
+      AND ps.subscription_status IN ('active', 'authenticated')
+    ORDER BY ps.created_at DESC
+    LIMIT 1;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION get_active_subscription IS 'Returns the active subscription details for a parish';
+
+-- Function to check if parish can add more parishioners based on plan limits
+CREATE OR REPLACE FUNCTION can_add_parishioner(p_parish_id BIGINT)
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_current_count INTEGER;
+    v_max_allowed INTEGER;
+    v_subscription_status VARCHAR(50);
+BEGIN
+    -- Get current parishioner count
+    SELECT COUNT(*) INTO v_current_count
+    FROM parishioners
+    WHERE parish_id = p_parish_id AND is_active = TRUE;
+
+    -- Get subscription limit and status
+    SELECT sp.max_parishioners, ps.subscription_status
+    INTO v_max_allowed, v_subscription_status
+    FROM parish_subscriptions ps
+    JOIN subscription_plans sp ON ps.plan_id = sp.plan_id
+    WHERE ps.parish_id = p_parish_id
+      AND ps.subscription_status IN ('active', 'authenticated')
+    ORDER BY ps.created_at DESC
+    LIMIT 1;
+
+    -- If no subscription found or not active, deny
+    IF v_subscription_status IS NULL OR v_subscription_status NOT IN ('active', 'authenticated') THEN
+        RETURN FALSE;
+    END IF;
+
+    -- If unlimited (max_parishioners = 0), allow
+    IF v_max_allowed = 0 THEN
+        RETURN TRUE;
+    END IF;
+
+    -- Check if within limit
+    RETURN v_current_count < v_max_allowed;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION can_add_parishioner IS 'Checks if parish can add more parishioners based on subscription plan limits';
+
+-- =====================================================
+-- STEP 5: CREATE TRIGGERS
+-- =====================================================
+
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_parishes_updated_at BEFORE UPDATE ON parishes
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_subscription_plans_updated_at BEFORE UPDATE ON subscription_plans
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_parish_subscriptions_updated_at BEFORE UPDATE ON parish_subscriptions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_subscription_payments_updated_at BEFORE UPDATE ON subscription_payments
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_church_admins_updated_at BEFORE UPDATE ON church_admins
@@ -518,14 +987,8 @@ CREATE TRIGGER update_bible_bookmarks_updated_at BEFORE UPDATE ON bible_bookmark
 CREATE TRIGGER update_email_templates_updated_at BEFORE UPDATE ON email_templates
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-
-
-
-
-
 -- =====================================================
--- PostgreSQL SEED DATA SCRIPT
--- System Roles, Permissions, and Sample Data
+-- STEP 6: INSERT SEED DATA
 -- =====================================================
 
 -- =====================================================
@@ -545,10 +1008,8 @@ VALUES
 -- Update sequence for roles
 SELECT setval('roles_role_id_seq', (SELECT MAX(role_id) FROM roles));
 
-\echo 'System roles inserted successfully!'
-
 -- =====================================================
--- SYSTEM PERMISSIONS (Granular access control)
+-- SYSTEM PERMISSIONS
 -- =====================================================
 
 INSERT INTO permissions (permission_id, permission_name, permission_code, description, module, action, is_active)
@@ -642,8 +1103,6 @@ VALUES
 -- Update sequence for permissions
 SELECT setval('permissions_permission_id_seq', (SELECT MAX(permission_id) FROM permissions));
 
-\echo 'System permissions inserted successfully!'
-
 -- =====================================================
 -- ROLE-PERMISSION MAPPINGS
 -- =====================================================
@@ -659,7 +1118,7 @@ VALUES
   (2, 1), (2, 2),
   -- Users (view only)
   (2, 11),
-  -- Parishes (view only - no create/edit/delete/manage)
+  -- Parishes (view only)
   (2, 21),
   -- Parishioners (full management)
   (2, 31), (2, 32), (2, 33), (2, 34), (2, 35),
@@ -684,8 +1143,8 @@ VALUES
   -- Analytics
   (2, 123);
 
-
-  INSERT INTO role_permissions (role_id, permission_id)
+-- FAMILY MEMBER: Basic permissions
+INSERT INTO role_permissions (role_id, permission_id)
 VALUES
   -- Profile
   (3, 1), (3, 2),
@@ -698,7 +1157,11 @@ VALUES
   -- Audiobooks (view)
   (3, 93);
 
-  INSERT INTO account_categories (category_id, category_name, category_type, description, is_system, is_active)
+-- =====================================================
+-- ACCOUNT CATEGORIES
+-- =====================================================
+
+INSERT INTO account_categories (category_id, category_name, category_type, description, is_system, is_active)
 VALUES
   -- INCOME CATEGORIES (1-20)
   (1, 'Sunday Collection', 'income', 'Regular Sunday mass collection', TRUE, TRUE),
@@ -752,9 +1215,8 @@ VALUES
 -- Update sequence for account_categories
 SELECT setval('account_categories_category_id_seq', (SELECT MAX(category_id) FROM account_categories));
 
-
 -- =====================================================
--- DEFAULT EMAIL TEMPLATES
+-- EMAIL TEMPLATES
 -- =====================================================
 
 INSERT INTO email_templates (template_id, template_code, template_name, subject, body_html, body_text, category, variables, description, is_active)
@@ -792,3 +1254,116 @@ VALUES
 -- Update sequence for email_templates
 SELECT setval('email_templates_template_id_seq', (SELECT MAX(template_id) FROM email_templates));
 
+-- =====================================================
+-- SUBSCRIPTION PLANS (Razorpay Integration)
+-- =====================================================
+
+INSERT INTO subscription_plans (
+    plan_id, plan_name, plan_code, tier, razorpay_plan_id, description, amount, currency, billing_cycle,
+    features, max_parishioners, max_families, max_wards, max_admins, max_users, max_storage_gb,
+    trial_period_days, is_active, is_featured, display_order
+) VALUES
+(1, 'Basic Plan', 'BASIC_MONTHLY', 'basic', 'plan_RbwIrFegTqBODg',
+ 'Perfect for small parishes getting started with digital management',
+ 1000.00, 'INR', 'monthly',
+ '["Up to 500 parishioners", "Up to 100 families", "Up to 5 wards", "Up to 3 admin users", "5GB storage", "Basic reporting", "Email support"]'::JSONB,
+ 500, 100, 5, 3, 3, 5,
+ 15, TRUE, FALSE, 1),
+
+(2, 'Standard Plan', 'STANDARD_MONTHLY', 'standard', 'plan_RbwMT3pylzkmEx',
+ 'Ideal for growing parishes with advanced needs',
+ 2499.00, 'INR', 'monthly',
+ '["Up to 2000 parishioners", "Up to 500 families", "Up to 20 wards", "Up to 10 admin users", "50GB storage", "Advanced reporting", "Priority email support", "Custom roles", "SMS notifications"]'::JSONB,
+ 2000, 500, 20, 10, 10, 50,
+ 15, TRUE, TRUE, 2),
+
+(3, 'Premium Plan', 'PREMIUM_MONTHLY', 'premium', 'plan_RbwOGqCPrETQZ2',
+ 'For large parishes requiring unlimited access and premium features',
+ 4999.00, 'INR', 'monthly',
+ '["Unlimited parishioners", "Unlimited families", "Unlimited wards", "Unlimited users", "200GB storage", "Advanced analytics", "24/7 priority support", "Custom branding", "API access", "Dedicated account manager", "Custom integrations"]'::JSONB,
+ 0, 0, NULL, 0, NULL, 200,
+ 30, TRUE, TRUE, 3),
+
+(4, 'Basic Plan (Yearly)', 'BASIC_YEARLY', 'basic', NULL,
+ 'Basic plan billed annually - Save 20%',
+ 9590.00, 'INR', 'yearly',
+ '["Up to 500 parishioners", "Up to 100 families", "Up to 5 wards", "Up to 3 admin users", "5GB storage", "Basic reporting", "Email support", "Save 2 months!"]'::JSONB,
+ 500, 100, 5, 3, 3, 5,
+ 15, FALSE, FALSE, 4),
+
+(5, 'Standard Plan (Yearly)', 'STANDARD_YEARLY', 'standard', NULL,
+ 'Standard plan billed annually - Save 20%',
+ 23990.00, 'INR', 'yearly',
+ '["Up to 2000 parishioners", "Up to 500 families", "Up to 20 wards", "Up to 10 admin users", "50GB storage", "Advanced reporting", "Priority email support", "Custom roles", "SMS notifications", "Save 2 months!"]'::JSONB,
+ 2000, 500, 20, 10, 10, 50,
+ 15, FALSE, TRUE, 5),
+
+(6, 'Premium Plan (Yearly)', 'PREMIUM_YEARLY', 'premium', NULL,
+ 'Premium plan billed annually - Save 20%',
+ 47990.00, 'INR', 'yearly',
+ '["Unlimited parishioners", "Unlimited families", "Unlimited wards", "Unlimited users", "200GB storage", "Advanced analytics", "24/7 priority support", "Custom branding", "API access", "Dedicated account manager", "Custom integrations", "Save 2 months!"]'::JSONB,
+ 0, 0, NULL, 0, NULL, 200,
+ 30, FALSE, TRUE, 6);
+
+-- Update sequence
+SELECT setval('subscription_plans_plan_id_seq', (SELECT MAX(plan_id) FROM subscription_plans));
+
+-- =====================================================
+-- DATABASE SETUP COMPLETE
+-- =====================================================
+
+-- Display summary
+DO $$
+DECLARE
+    table_count INTEGER;
+    index_count INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO table_count FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';
+    SELECT COUNT(*) INTO index_count FROM pg_indexes WHERE schemaname = 'public';
+
+    RAISE NOTICE '========================================';
+    RAISE NOTICE 'Parish Management System Database';
+    RAISE NOTICE 'Setup completed successfully!';
+    RAISE NOTICE '========================================';
+    RAISE NOTICE 'Tables created: %', table_count;
+    RAISE NOTICE 'Indexes created: %', index_count;
+    RAISE NOTICE 'Roles seeded: 4';
+    RAISE NOTICE 'Permissions seeded: 123';
+    RAISE NOTICE 'Subscription plans: 6 (3 active monthly, 3 inactive yearly)';
+    RAISE NOTICE '========================================';
+    RAISE NOTICE 'Next steps:';
+    RAISE NOTICE '1. Configure Razorpay environment variables';
+    RAISE NOTICE '2. Set up Razorpay webhook endpoint';
+    RAISE NOTICE '3. Create your first super admin user';
+    RAISE NOTICE '========================================';
+END $$;
+
+-- =====================================================
+-- RAZORPAY CONFIGURATION NOTES
+-- =====================================================
+--
+-- Environment Variables Required:
+-- RAZORPAY_KEY_ID=your_razorpay_key_id
+-- RAZORPAY_KEY_SECRET=your_razorpay_key_secret
+-- RAZORPAY_WEBHOOK_SECRET=your_webhook_secret
+--
+-- Webhook URL: https://yourdomain.com/api/v1/webhooks/razorpay
+--
+-- Webhook Events to Enable:
+-- - subscription.activated
+-- - subscription.charged
+-- - subscription.completed
+-- - subscription.cancelled
+-- - subscription.paused
+-- - subscription.resumed
+-- - subscription.halted
+-- - payment.captured
+-- - payment.failed
+--
+-- Active Monthly Plans (Razorpay):
+-- - Basic Plan: ₹1,000/month (plan_RbwIrFegTqBODg)
+-- - Standard Plan: ₹2,499/month (plan_RbwMT3pylzkmEx)
+-- - Premium Plan: ₹4,999/month (plan_RbwOGqCPrETQZ2)
+--
+-- Yearly plans are disabled until created in Razorpay Dashboard
+-- =====================================================

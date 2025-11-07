@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from 'express';
 import { UserModel } from '../models/User';
 import { ParishModel } from '../models/Parish';
 import { RoleModel, UserRoleModel, PermissionModel } from '../models/Role';
+import { ParishSubscriptionModel } from '../models/Subscription';
 import { PasswordUtil } from '../utils/password';
 import { JwtUtil } from '../utils/jwt';
 import { ApiError } from '../utils/apiError';
@@ -200,6 +201,173 @@ const { token, expires_in, expires_at } = JwtUtil.generateAccessToken(tokenPaylo
       const isValidPassword = await PasswordUtil.compare(password, user.password_hash);
       if (!isValidPassword) {
         throw ApiError.unauthorized('Invalid email or password');
+      }
+
+      // ✅ CRITICAL: Check parish subscription status for church_admin and parishioner users
+      if (user.user_type === UserType.CHURCH_ADMIN || user.user_type === UserType.PARISHIONER) {
+        let parishId: number | null = null;
+
+        // Get parish_id for the user
+        if (user.user_type === UserType.CHURCH_ADMIN) {
+          const adminResult = await database.executeQuery(`
+            SELECT parish_id FROM church_admins WHERE user_id = @userId AND is_active = TRUE
+          `, { userId: user.user_id });
+
+          if (adminResult.rows.length > 0) {
+            parishId = adminResult.rows[0].parish_id;
+          }
+        } else if (user.user_type === UserType.PARISHIONER) {
+          const parishionerResult = await database.executeQuery(`
+            SELECT parish_id FROM parishioners WHERE user_id = @userId AND is_active = TRUE
+          `, { userId: user.user_id });
+
+          if (parishionerResult.rows.length > 0) {
+            parishId = parishionerResult.rows[0].parish_id;
+          }
+        }
+
+        // If we found a parish association, check subscription status
+        if (parishId) {
+          const parish = await ParishModel.findById(parishId);
+
+          if (!parish) {
+            logger.error('Parish not found for user during login', {
+              userId: user.user_id,
+              parishId: parishId,
+            });
+            throw ApiError.unauthorized('Parish not found. Please contact support.');
+          }
+
+          // Check subscription status
+          if (parish.subscription_status === 'PENDING') {
+            logger.warn('Login attempt with pending subscription - returning payment details', {
+              userId: user.user_id,
+              parishId: parishId,
+              email: user.email,
+              subscriptionStatus: parish.subscription_status,
+            });
+
+            // Get subscription details to return payment information
+            const subscription = await ParishSubscriptionModel.getSubscriptionWithPlan(parishId);
+
+            if (!subscription) {
+              throw ApiError.unauthorized(
+                'Access denied: Your parish subscription payment is pending. Please contact support.'
+              );
+            }
+
+            // Return different response based on payment method
+            if (subscription.payment_method === 'cash') {
+              // Cash payment - waiting for admin verification
+              res.status(402).json({
+                success: false,
+                payment_required: true,
+                payment_method: 'cash',
+                message: 'Your parish subscription is pending cash payment verification.',
+                data: {
+                  parish: {
+                    parish_id: parish.parish_id,
+                    parish_name: parish.parish_name,
+                    subscription_status: parish.subscription_status,
+                  },
+                  subscription: {
+                    subscription_id: subscription.subscription_id,
+                    plan_name: subscription.plan_name,
+                    amount: subscription.amount,
+                    billing_cycle: subscription.billing_cycle,
+                    payment_method: 'cash',
+                  },
+                  instructions: [
+                    'Your cash payment is pending verification by the admin.',
+                    'Please contact the parish office if you have already made the payment.',
+                    'Once verified, you will be able to login.',
+                  ],
+                },
+              });
+              return;
+            }
+
+            // Online payment - return Razorpay details for payment
+            res.status(402).json({
+              success: false,
+              payment_required: true,
+              payment_method: 'online',
+              message: 'Your parish subscription payment is pending. Please complete the payment to access the system.',
+              data: {
+                parish: {
+                  parish_id: parish.parish_id,
+                  parish_name: parish.parish_name,
+                  subscription_status: parish.subscription_status,
+                },
+                subscription: {
+                  subscription_id: subscription.subscription_id,
+                  plan_name: subscription.plan_name,
+                  amount: subscription.amount,
+                  billing_cycle: subscription.billing_cycle,
+                  payment_method: 'online',
+                  razorpay_subscription_id: subscription.razorpay_subscription_id,
+                },
+                // Razorpay payment details
+                razorpay_subscription_id: subscription.razorpay_subscription_id,
+                razorpay_key_id: process.env.RAZORPAY_KEY_ID,
+                checkout_info: {
+                  message: 'Complete your payment to activate your subscription',
+                  integration_type: 'standard_checkout',
+                  steps: [
+                    '1. Use razorpay_subscription_id and razorpay_key_id to open Razorpay checkout',
+                    '2. Complete payment using your preferred method',
+                    '3. After payment, verify by calling POST /subscriptions/verify-payment',
+                    '4. Login again to access your account',
+                  ],
+                },
+              },
+            });
+            return;
+          }
+
+          if (parish.subscription_status === 'SUSPENDED') {
+            logger.warn('Login blocked: Parish subscription is suspended', {
+              userId: user.user_id,
+              parishId: parishId,
+              email: user.email,
+              subscriptionStatus: parish.subscription_status,
+            });
+            throw ApiError.unauthorized(
+              'Access denied: Your parish subscription has been suspended. Please contact support or renew your subscription.'
+            );
+          }
+
+          if (parish.subscription_status === 'CANCELLED') {
+            logger.warn('Login blocked: Parish subscription is cancelled', {
+              userId: user.user_id,
+              parishId: parishId,
+              email: user.email,
+              subscriptionStatus: parish.subscription_status,
+            });
+            throw ApiError.unauthorized(
+              'Access denied: Your parish subscription has been cancelled. Please renew your subscription to access the system.'
+            );
+          }
+
+          // Only ACTIVE subscriptions are allowed
+          if (parish.subscription_status !== 'ACTIVE') {
+            logger.warn('Login blocked: Parish subscription status invalid', {
+              userId: user.user_id,
+              parishId: parishId,
+              email: user.email,
+              subscriptionStatus: parish.subscription_status,
+            });
+            throw ApiError.unauthorized(
+              'Access denied: Your parish subscription is not active. Please contact support.'
+            );
+          }
+
+          logger.info('Subscription status verified for login', {
+            userId: user.user_id,
+            parishId: parishId,
+            subscriptionStatus: parish.subscription_status,
+          });
+        }
       }
 
       // Update last login

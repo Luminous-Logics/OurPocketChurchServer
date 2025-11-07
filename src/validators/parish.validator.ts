@@ -17,8 +17,7 @@ export const createParishSchema = {
     established_date: Joi.date().optional(),
     patron_saint: Joi.string().max(200).optional(),
     timezone: Joi.string().max(50).optional().default('UTC'),
-    subscription_plan: Joi.string().max(50).optional(),
-    subscription_expiry: Joi.date().optional(),
+
     // Optional Church Admin user fields
     admin_email: Joi.string().email().optional(),
     admin_password: Joi.string().min(8).optional(),
@@ -27,7 +26,22 @@ export const createParishSchema = {
     admin_phone: Joi.string().optional(),
     admin_role: Joi.string().max(100).optional(),
     admin_department: Joi.string().max(100).optional(),
-  }).and('admin_email', 'admin_password', 'admin_first_name', 'admin_last_name'), // If any admin field is provided, all required admin fields must be provided
+
+    // Optional Subscription fields (if provided, subscription is created automatically)
+    plan_id: Joi.number().integer().positive().optional(),
+    payment_method: Joi.string().valid('online', 'cash').default('online').optional(),
+    billing_cycle: Joi.string().valid('monthly', 'quarterly', 'yearly').optional(),
+    billing_name: Joi.string().min(2).max(100).optional(),
+    billing_email: Joi.string().email().max(100).optional(),
+    billing_phone: Joi.string().pattern(/^[6-9]\d{9}$/).optional(),
+    billing_address: Joi.string().min(10).max(500).optional(),
+    billing_city: Joi.string().min(2).max(100).optional(),
+    billing_state: Joi.string().min(2).max(100).optional(),
+    billing_pincode: Joi.string().pattern(/^\d{6}$/).optional(),
+    billing_country: Joi.string().valid('IN').default('IN').optional(),
+  })
+    .and('admin_email', 'admin_password', 'admin_first_name', 'admin_last_name') // If any admin field is provided, all required admin fields must be provided
+    .and('plan_id', 'billing_cycle', 'billing_name', 'billing_email', 'billing_phone'), // If subscription fields provided, all required
 };
 
 export const updateParishSchema = {
@@ -46,8 +60,12 @@ export const updateParishSchema = {
     established_date: Joi.date().optional(),
     patron_saint: Joi.string().max(200).optional(),
     timezone: Joi.string().max(50).optional(),
-    subscription_plan: Joi.string().max(50).optional(),
-    subscription_expiry: Joi.date().optional(),
+
+    // Razorpay subscription fields (read-only - managed via subscription endpoints)
+    // subscription_status: Updated via webhooks and subscription service
+    // current_plan_id: Updated via subscription creation
+    // is_subscription_managed: Should not be changed after creation
+
     is_active: Joi.boolean().optional(),
   }).min(1), // At least one field must be provided
 };

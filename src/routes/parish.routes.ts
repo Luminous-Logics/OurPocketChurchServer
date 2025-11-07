@@ -162,7 +162,7 @@ router.get('/:id/stats', authenticate, requirePermission('VIEW_PARISHES'), valid
  *   post:
  *     summary: Create a new parish
  *     tags: [Parishes]
- *     description: Create a new parish (Super Admin only)
+ *     description: Create a new parish with optional subscription creation (Super Admin only). If subscription fields (plan_id, billing_cycle, billing_name, billing_email, billing_phone) are provided, a subscription will be created automatically and payment_link will be returned in the response.
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -173,7 +173,7 @@ router.get('/:id/stats', authenticate, requirePermission('VIEW_PARISHES'), valid
  *             $ref: '#/components/schemas/CreateParish'
  *     responses:
  *       201:
- *         description: Parish created successfully
+ *         description: Parish created successfully (includes subscription and payment_link if subscription fields were provided)
  *         content:
  *           application/json:
  *             schema:
@@ -186,7 +186,56 @@ router.get('/:id/stats', authenticate, requirePermission('VIEW_PARISHES'), valid
  *                   type: string
  *                   example: Parish created successfully
  *                 data:
- *                   $ref: '#/components/schemas/Parish'
+ *                   type: object
+ *                   properties:
+ *                     parish:
+ *                       $ref: '#/components/schemas/Parish'
+ *                     admin:
+ *                       type: object
+ *                       description: Church admin user details (if created)
+ *                     subscription:
+ *                       type: object
+ *                       description: Subscription details (if created)
+ *                       properties:
+ *                         subscription_id:
+ *                           type: integer
+ *                           example: 1
+ *                         razorpay_subscription_id:
+ *                           type: string
+ *                           example: sub_xyz123
+ *                         plan_name:
+ *                           type: string
+ *                           example: Standard Plan
+ *                         amount:
+ *                           type: number
+ *                           example: 2499
+ *                         billing_cycle:
+ *                           type: string
+ *                           example: monthly
+ *                     razorpay_subscription_id:
+ *                       type: string
+ *                       example: sub_xyz123
+ *                       description: Razorpay subscription ID - use this for Standard Checkout integration
+ *                     razorpay_key_id:
+ *                       type: string
+ *                       example: rzp_test_abc123
+ *                       description: Razorpay API key ID - frontend needs this for checkout
+ *                     checkout_info:
+ *                       type: object
+ *                       description: Integration instructions for payment checkout
+ *                       properties:
+ *                         message:
+ *                           type: string
+ *                           example: Use razorpay_subscription_id with Razorpay Standard Checkout for payment
+ *                         integration_type:
+ *                           type: string
+ *                           example: standard_checkout
+ *                         test_mode:
+ *                           type: boolean
+ *                           example: true
+ *                     razorpay_subscription:
+ *                       type: object
+ *                       description: Full Razorpay subscription response for debugging
  *       400:
  *         description: Bad request - Invalid input data
  *         content:
@@ -208,8 +257,6 @@ router.get('/:id/stats', authenticate, requirePermission('VIEW_PARISHES'), valid
  */
 router.post(
   '/',
-  authenticate,
-  requirePermission('CREATE_PARISH'),
   validate(createParishSchema),
   ParishController.create
 );

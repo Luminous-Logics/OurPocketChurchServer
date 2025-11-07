@@ -73,6 +73,14 @@ const swaggerDefinition = {
       name: 'Health',
       description: 'API health and status endpoints',
     },
+    {
+      name: 'Subscriptions',
+      description: 'Subscription plan and parish subscription management endpoints',
+    },
+    {
+      name: 'Webhooks',
+      description: 'Razorpay webhook endpoints for payment notifications',
+    },
   ],
   components: {
     securitySchemes: {
@@ -356,14 +364,21 @@ const swaggerDefinition = {
             type: 'string',
             example: 'America/Chicago',
           },
-          subscription_plan: {
-            type: 'string',
-            example: 'premium',
+          is_subscription_managed: {
+            type: 'boolean',
+            example: true,
+            description: 'TRUE if parish uses Razorpay subscriptions',
           },
-          subscription_expiry: {
+          current_plan_id: {
+            type: 'integer',
+            example: 2,
+            description: 'Current active subscription plan ID (references subscription_plans table)',
+          },
+          subscription_status: {
             type: 'string',
-            format: 'date',
-            example: '2025-12-31',
+            enum: ['PENDING', 'ACTIVE', 'SUSPENDED', 'CANCELLED'],
+            example: 'ACTIVE',
+            description: 'Parish subscription status - PENDING (awaiting payment), ACTIVE (paid), SUSPENDED (payment failed), CANCELLED',
           },
           is_active: {
             type: 'boolean',
@@ -462,18 +477,6 @@ const swaggerDefinition = {
             default: 'UTC',
             description: 'Timezone for the parish',
           },
-          subscription_plan: {
-            type: 'string',
-            maxLength: 50,
-            example: 'premium',
-            description: 'Subscription plan (e.g., basic, premium, enterprise)',
-          },
-          subscription_expiry: {
-            type: 'string',
-            format: 'date',
-            example: '2025-12-31',
-            description: 'Date when the subscription expires',
-          },
           admin_email: {
             type: 'string',
             format: 'email',
@@ -518,8 +521,73 @@ const swaggerDefinition = {
             example: 'Administration',
             description: '(Optional) Department of the church admin (e.g., Administration, Finance)',
           },
+          plan_id: {
+            type: 'integer',
+            example: 2,
+            description: '(Optional) Subscription plan ID - if provided with billing details, creates subscription automatically. View available plans at /subscriptions/plans',
+          },
+          billing_cycle: {
+            type: 'string',
+            enum: ['monthly', 'quarterly', 'yearly'],
+            example: 'monthly',
+            description: '(Optional) Billing cycle for the subscription - required if plan_id is provided',
+          },
+          billing_name: {
+            type: 'string',
+            minLength: 2,
+            maxLength: 100,
+            example: 'St. Mary Parish',
+            description: '(Optional) Name for billing - required if plan_id is provided',
+          },
+          billing_email: {
+            type: 'string',
+            format: 'email',
+            maxLength: 100,
+            example: 'billing@stmary.org',
+            description: '(Optional) Email for billing notifications - required if plan_id is provided',
+          },
+          billing_phone: {
+            type: 'string',
+            pattern: '^[6-9]\\d{9}$',
+            example: '9876543210',
+            description: '(Optional) Indian phone number for billing (10 digits starting with 6-9) - required if plan_id is provided',
+          },
+          billing_address: {
+            type: 'string',
+            minLength: 10,
+            maxLength: 500,
+            example: '123 Church Street, Suite 100',
+            description: '(Optional) Billing address - recommended if plan_id is provided',
+          },
+          billing_city: {
+            type: 'string',
+            minLength: 2,
+            maxLength: 100,
+            example: 'Mumbai',
+            description: '(Optional) Billing city - recommended if plan_id is provided',
+          },
+          billing_state: {
+            type: 'string',
+            minLength: 2,
+            maxLength: 100,
+            example: 'Maharashtra',
+            description: '(Optional) Billing state - recommended if plan_id is provided',
+          },
+          billing_pincode: {
+            type: 'string',
+            pattern: '^\\d{6}$',
+            example: '400001',
+            description: '(Optional) Indian pincode (6 digits) - recommended if plan_id is provided',
+          },
+          billing_country: {
+            type: 'string',
+            enum: ['IN'],
+            default: 'IN',
+            example: 'IN',
+            description: '(Optional) Country code - currently only India (IN) is supported',
+          },
         },
-        description: 'Creates a new parish. Optionally creates a church admin account if admin details are provided (admin_email, admin_password, admin_first_name, and admin_last_name are required together).',
+        description: 'Creates a new parish with PENDING subscription status. Parish must complete payment to become ACTIVE. **Single-API Registration Flow**: Optionally provide subscription details (plan_id, billing_cycle, billing_name, billing_email, billing_phone) during parish creation to receive a payment_link immediately. If subscription fields are provided, the response will include subscription details and payment_link. After payment, the parish status will automatically update to ACTIVE via webhook. **Legacy Two-Step Flow**: Alternatively, create parish first, then create subscription separately at /subscriptions. Subscription fields (is_subscription_managed, current_plan_id, subscription_status) are system-managed. Optionally creates a church admin account if admin details are provided (admin_email, admin_password, admin_first_name, and admin_last_name are required together).',
       },
       UpdateParish: {
         type: 'object',
@@ -595,23 +663,13 @@ const swaggerDefinition = {
             maxLength: 50,
             example: 'America/Chicago',
           },
-          subscription_plan: {
-            type: 'string',
-            maxLength: 50,
-            example: 'premium',
-          },
-          subscription_expiry: {
-            type: 'string',
-            format: 'date',
-            example: '2025-12-31',
-          },
           is_active: {
             type: 'boolean',
             example: true,
             description: 'Whether the parish is active',
           },
         },
-        description: 'At least one field must be provided for update',
+        description: 'Updates parish information. Subscription fields (is_subscription_managed, current_plan_id, subscription_status) are read-only and managed via subscription endpoints and webhooks. At least one field must be provided for update.',
       },
       PaginatedParishResponse: {
         type: 'object',
