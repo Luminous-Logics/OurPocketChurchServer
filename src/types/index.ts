@@ -703,5 +703,182 @@ export interface IUserReadingPlanSubscription {
 }
 
 // =====================================================
+// TEMPLATE MANAGEMENT (Added: 2025-11-16)
+// =====================================================
+
+export interface ITemplate {
+  template_id: number;
+  parish_id: number;
+  template_name: string;
+  template_code: string;
+  description?: string;
+  html_content: string;
+  category?: string;
+  is_active: boolean;
+  created_by?: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface ITemplateInput {
+  parish_id: number;
+  template_name: string;
+  template_code: string;
+  description?: string;
+  html_content: string;
+  category?: string;
+  is_active?: boolean;
+  created_by?: number;
+}
+
+export interface ITemplateUpdate {
+  template_name?: string;
+  template_code?: string;
+  description?: string;
+  html_content?: string;
+  category?: string;
+  is_active?: boolean;
+}
+
+// =====================================================
+// CERTIFICATE MANAGEMENT (Added: 2025-11-16)
+// =====================================================
+
+export enum CertificateStatus {
+  DRAFT = 'draft',
+  PENDING_APPROVAL = 'pending_approval',
+  APPROVED = 'approved',
+  ISSUED = 'issued',
+  REVOKED = 'revoked',
+  CANCELLED = 'cancelled',
+}
+
+export interface ICertificateType {
+  certificate_type_id: number;
+  parish_id: number;
+  type_name: string;
+  type_code: string;
+  description?: string;
+  default_template_id?: number;
+  requires_approval: boolean;
+  auto_generate_number: boolean;
+  number_prefix?: string;
+  number_format: string;
+  available_placeholders: string[]; // Array of placeholder field names
+  is_active: boolean;
+  created_by?: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface ICertificateTypeInput {
+  parish_id: number;
+  type_name: string;
+  type_code: string;
+  description?: string;
+  default_template_id?: number;
+  requires_approval?: boolean;
+  auto_generate_number?: boolean;
+  number_prefix?: string;
+  number_format?: string;
+  available_placeholders?: string[];
+  is_active?: boolean;
+  created_by?: number;
+}
+
+export interface ICertificateTypeUpdate {
+  type_name?: string;
+  type_code?: string;
+  description?: string;
+  default_template_id?: number;
+  requires_approval?: boolean;
+  auto_generate_number?: boolean;
+  number_prefix?: string;
+  number_format?: string;
+  available_placeholders?: string[];
+  is_active?: boolean;
+}
+
+export interface ICertificate {
+  certificate_id: number;
+  parish_id: number;
+  certificate_type_id: number;
+  certificate_number: string;
+  recipient_parishioner_id?: number;
+  recipient_name: string;
+  template_id?: number;
+  certificate_data: Record<string, any>; // Key-value pairs for placeholders
+  generated_html?: string;
+  seal_image_url?: string;
+  signature_image_url?: string;
+  signed_by?: string;
+  signed_by_user_id?: number;
+  issue_date: Date;
+  issued_by?: number;
+  status: CertificateStatus;
+  approved_by?: number;
+  approved_at?: Date;
+  revoked_at?: Date;
+  revoked_by?: number;
+  revocation_reason?: string;
+  notes?: string;
+  is_public: boolean;
+  created_at: Date;
+  updated_at: Date;
+  // Joined fields
+  certificate_type_name?: string;
+  template_name?: string;
+}
+
+export interface ICertificateInput {
+  parish_id: number;
+  certificate_type_id: number;
+  certificate_number?: string; // Optional if auto-generated
+  recipient_parishioner_id?: number;
+  recipient_name: string;
+  template_id?: number;
+  certificate_data: Record<string, any>;
+  seal_image_url?: string;
+  signature_image_url?: string;
+  signed_by?: string;
+  signed_by_user_id?: number;
+  issue_date: Date;
+  issued_by?: number;
+  status?: CertificateStatus;
+  notes?: string;
+  is_public?: boolean;
+}
+
+export interface ICertificateUpdate {
+  recipient_parishioner_id?: number;
+  recipient_name?: string;
+  template_id?: number;
+  certificate_data?: Record<string, any>;
+  generated_html?: string;
+  seal_image_url?: string;
+  signature_image_url?: string;
+  signed_by?: string;
+  signed_by_user_id?: number;
+  issue_date?: Date;
+  status?: CertificateStatus;
+  notes?: string;
+  is_public?: boolean;
+}
+
+export interface ICertificateHistory {
+  history_id: number;
+  certificate_id: number;
+  action: string;
+  old_status?: string;
+  new_status?: string;
+  changed_fields?: string[];
+  old_values?: Record<string, any>;
+  new_values?: Record<string, any>;
+  performed_by?: number;
+  performed_at: Date;
+  reason?: string;
+}
+
+// =====================================================
 // RAZORPAY SUBSCRIPTION TYPES (Added: 2025-01-04)
 // =====================================================

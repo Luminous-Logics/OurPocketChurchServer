@@ -81,6 +81,14 @@ const swaggerDefinition = {
       name: 'Webhooks',
       description: 'Razorpay webhook endpoints for payment notifications',
     },
+    {
+      name: 'Templates',
+      description: 'HTML template management endpoints for certificates, bulletins, newsletters, etc.',
+    },
+    {
+      name: 'Certificates',
+      description: 'Certificate management endpoints (types and certificates) for issuing death, marriage, baptism, and other parish certificates',
+    },
   ],
   components: {
     securitySchemes: {
