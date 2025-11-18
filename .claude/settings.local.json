@@ -8,7 +8,8 @@
       "Bash(taskkill:*)",
       "Bash(npx ts-node:*)",
       "Bash(curl:*)",
-      "Bash(nul)"
+      "Bash(nul)",
+      "Bash(npm uninstall:*)"
     ],
     "deny": [],
     "ask": []
