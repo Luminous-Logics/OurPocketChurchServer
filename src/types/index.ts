@@ -756,46 +756,38 @@ export enum CertificateStatus {
 export interface ICertificateType {
   certificate_type_id: number;
   parish_id: number;
+  template_id: number;
   type_name: string;
   type_code: string;
   description?: string;
-  default_template_id?: number;
-  requires_approval: boolean;
-  auto_generate_number: boolean;
-  number_prefix?: string;
-  number_format: string;
-  available_placeholders: string[]; // Array of placeholder field names
+  prefix?: string;
+  next_number?: number;
   is_active: boolean;
   created_by?: number;
   created_at: Date;
   updated_at: Date;
+  // Joined fields
+  template_name?: string;
+  html_content?: string;
+  placeholders?: string[];
 }
 
 export interface ICertificateTypeInput {
   parish_id: number;
+  template_id: number;
   type_name: string;
   type_code: string;
   description?: string;
-  default_template_id?: number;
-  requires_approval?: boolean;
-  auto_generate_number?: boolean;
-  number_prefix?: string;
-  number_format?: string;
-  available_placeholders?: string[];
-  is_active?: boolean;
+  prefix?: string;
   created_by?: number;
 }
 
 export interface ICertificateTypeUpdate {
+  template_id?: number;
   type_name?: string;
   type_code?: string;
   description?: string;
-  default_template_id?: number;
-  requires_approval?: boolean;
-  auto_generate_number?: boolean;
-  number_prefix?: string;
-  number_format?: string;
-  available_placeholders?: string[];
+  prefix?: string;
   is_active?: boolean;
 }
 
@@ -804,79 +796,71 @@ export interface ICertificate {
   parish_id: number;
   certificate_type_id: number;
   certificate_number: string;
-  recipient_parishioner_id?: number;
-  recipient_name: string;
-  template_id?: number;
-  certificate_data: Record<string, any>; // Key-value pairs for placeholders
-  generated_html?: string;
-  seal_image_url?: string;
-  signature_image_url?: string;
-  signed_by?: string;
-  signed_by_user_id?: number;
-  issue_date: Date;
-  issued_by?: number;
+  parishioner_id?: number;
+  placeholder_values: Record<string, any>; // Key-value pairs for placeholders
+  pdf_url?: string;
+  pdf_key?: string;
   status: CertificateStatus;
+  issued_by?: number;
+  issued_at?: Date;
   approved_by?: number;
   approved_at?: Date;
-  revoked_at?: Date;
   revoked_by?: number;
+  revoked_at?: Date;
   revocation_reason?: string;
   notes?: string;
-  is_public: boolean;
+  created_by?: number;
   created_at: Date;
   updated_at: Date;
   // Joined fields
-  certificate_type_name?: string;
+  type_name?: string;
+  prefix?: string;
   template_name?: string;
+  html_content?: string;
+  placeholders?: string[];
+  first_name?: string;
+  last_name?: string;
 }
 
 export interface ICertificateInput {
   parish_id: number;
   certificate_type_id: number;
-  certificate_number?: string; // Optional if auto-generated
-  recipient_parishioner_id?: number;
-  recipient_name: string;
-  template_id?: number;
-  certificate_data: Record<string, any>;
-  seal_image_url?: string;
-  signature_image_url?: string;
-  signed_by?: string;
-  signed_by_user_id?: number;
-  issue_date: Date;
-  issued_by?: number;
+  certificate_number: string;
+  parishioner_id?: number;
+  placeholder_values: Record<string, any>;
+  pdf_url?: string;
+  pdf_key?: string;
   status?: CertificateStatus;
+  issued_by?: number;
+  issued_at?: Date;
   notes?: string;
-  is_public?: boolean;
+  created_by?: number;
 }
 
 export interface ICertificateUpdate {
-  recipient_parishioner_id?: number;
-  recipient_name?: string;
-  template_id?: number;
-  certificate_data?: Record<string, any>;
-  generated_html?: string;
-  seal_image_url?: string;
-  signature_image_url?: string;
-  signed_by?: string;
-  signed_by_user_id?: number;
-  issue_date?: Date;
   status?: CertificateStatus;
+  placeholder_values?: Record<string, any>;
+  pdf_url?: string;
+  pdf_key?: string;
   notes?: string;
-  is_public?: boolean;
+  approved_by?: number;
 }
 
 export interface ICertificateHistory {
   history_id: number;
   certificate_id: number;
   action: string;
-  old_status?: string;
-  new_status?: string;
-  changed_fields?: string[];
-  old_values?: Record<string, any>;
-  new_values?: Record<string, any>;
+  old_status?: CertificateStatus;
+  new_status?: CertificateStatus;
+  changes?: Record<string, any>;
   performed_by?: number;
+  ip_address?: string;
+  user_agent?: string;
+  notes?: string;
   performed_at: Date;
-  reason?: string;
+  // Joined fields
+  first_name?: string;
+  last_name?: string;
 }
 
 // =====================================================

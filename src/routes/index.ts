@@ -13,6 +13,9 @@ import otpRoutes from './otp.routes';
 import uploadRoutes from './upload.routes';
 import subscriptionRoutes from './subscription.routes';
 import webhookRoutes from './webhook.routes';
+import templateRoutes from './template.routes';
+import certificateTypeRoutes from './certificateType.routes';
+import certificateRoutes from './certificate.routes';
 // Import other route modules here as they are created
 // etc.
 
@@ -56,6 +59,9 @@ router.use('/otp', otpRoutes);
 router.use('/upload', uploadRoutes);
 router.use('/subscriptions', subscriptionRoutes);
 router.use('/webhooks', webhookRoutes);
+router.use('/templates', templateRoutes);
+router.use('/certificate-types', certificateTypeRoutes);
+router.use('/certificates', certificateRoutes);
 // Add more routes as needed
 
 export default router;

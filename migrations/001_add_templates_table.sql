@@ -1,72 +1,63 @@
 -- =====================================================
--- Template Management Module
--- Migration: Add HTML Templates Table
--- Created: 2025-11-16
+-- MIGRATION: Add Templates Table for Certificate Templates
+-- Created: 2025-11-18
+-- Description: Creates the templates table for storing HTML certificate templates
+-- with placeholder support
 -- =====================================================
 
 -- Create templates table
 CREATE TABLE templates (
     template_id BIGSERIAL PRIMARY KEY,
-    parish_id BIGINT NOT NULL REFERENCES parishes(parish_id) ON DELETE CASCADE,
+    parish_id BIGINT NOT NULL REFERENCES parishes(parish_id),
     template_name VARCHAR(255) NOT NULL,
     template_code VARCHAR(100) NOT NULL,
     description TEXT,
     html_content TEXT NOT NULL,
-    category VARCHAR(50),
-
-    -- Metadata
+    placeholders JSONB DEFAULT '[]'::JSONB,
+    category VARCHAR(100),
     is_active BOOLEAN DEFAULT TRUE,
     created_by BIGINT REFERENCES users(user_id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-    -- Ensure unique template codes within a parish
-    UNIQUE (parish_id, template_code)
+    UNIQUE (template_code, parish_id)
 );
 
-COMMENT ON TABLE templates IS 'HTML templates for various parish communications and documents';
-COMMENT ON COLUMN templates.template_code IS 'Unique code identifier for the template within a parish';
-COMMENT ON COLUMN templates.html_content IS 'HTML content of the template';
-COMMENT ON COLUMN templates.category IS 'Category of template (e.g., newsletter, bulletin, announcement, certificate)';
+COMMENT ON TABLE templates IS 'HTML templates for certificates with placeholder support';
+COMMENT ON COLUMN templates.html_content IS 'HTML content with placeholders in {{variableName}} format';
+COMMENT ON COLUMN templates.placeholders IS 'JSON array of placeholder names extracted from HTML content';
+COMMENT ON COLUMN templates.template_code IS 'Unique code for the template within a parish';
 
 -- Create indexes
 CREATE INDEX idx_templates_parish_id ON templates(parish_id);
+CREATE INDEX idx_templates_template_code ON templates(template_code);
 CREATE INDEX idx_templates_category ON templates(category);
 CREATE INDEX idx_templates_is_active ON templates(is_active);
-CREATE INDEX idx_templates_created_by ON templates(created_by);
 
 -- Add trigger for updated_at
-CREATE TRIGGER update_templates_updated_at BEFORE UPDATE ON templates
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_templates_updated_at
+BEFORE UPDATE ON templates
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- =====================================================
--- Add Template Management Permissions
--- =====================================================
-
-INSERT INTO permissions (permission_id, permission_name, permission_code, description, module, action, is_active)
+-- Add permissions
+INSERT INTO permissions (permission_name, permission_code, description, module, action, is_active)
 VALUES
-  (131, 'View Templates', 'VIEW_TEMPLATES', 'Can view HTML templates', 'Templates', 'view', TRUE),
-  (132, 'Create Template', 'CREATE_TEMPLATE', 'Can create new HTML templates', 'Templates', 'create', TRUE),
-  (133, 'Edit Template', 'EDIT_TEMPLATE', 'Can edit HTML templates', 'Templates', 'edit', TRUE),
-  (134, 'Delete Template', 'DELETE_TEMPLATE', 'Can delete HTML templates', 'Templates', 'delete', TRUE),
-  (135, 'Manage Templates', 'MANAGE_TEMPLATES', 'Full template management', 'Templates', 'manage', TRUE);
+  ('View Templates', 'VIEW_TEMPLATES', 'Can view certificate templates', 'Templates', 'view', TRUE),
+  ('Create Template', 'CREATE_TEMPLATE', 'Can create new certificate templates', 'Templates', 'create', TRUE),
+  ('Edit Template', 'EDIT_TEMPLATE', 'Can edit certificate templates', 'Templates', 'edit', TRUE),
+  ('Delete Template', 'DELETE_TEMPLATE', 'Can delete certificate templates', 'Templates', 'delete', TRUE),
+  ('Manage Templates', 'MANAGE_TEMPLATES', 'Full management of certificate templates', 'Templates', 'manage', TRUE);
 
--- Update sequence for permissions
-SELECT setval('permissions_permission_id_seq', (SELECT MAX(permission_id) FROM permissions));
-
--- =====================================================
--- Assign Template Permissions to Roles
--- =====================================================
-
--- SUPER ADMIN: All template permissions
+-- Grant permissions to Super Admin (role_id = 1)
 INSERT INTO role_permissions (role_id, permission_id)
-VALUES
-  (1, 131), (1, 132), (1, 133), (1, 134), (1, 135);
+SELECT 1, permission_id
+FROM permissions
+WHERE permission_code IN ('VIEW_TEMPLATES', 'CREATE_TEMPLATE', 'EDIT_TEMPLATE', 'DELETE_TEMPLATE', 'MANAGE_TEMPLATES');
 
--- CHURCH ADMIN: All template permissions
+-- Grant permissions to Church Admin (role_id = 2)
 INSERT INTO role_permissions (role_id, permission_id)
-VALUES
-  (2, 131), (2, 132), (2, 133), (2, 134), (2, 135);
+SELECT 2, permission_id
+FROM permissions
+WHERE permission_code IN ('VIEW_TEMPLATES', 'CREATE_TEMPLATE', 'EDIT_TEMPLATE', 'DELETE_TEMPLATE', 'MANAGE_TEMPLATES');
 
 -- =====================================================
 -- Migration Complete
